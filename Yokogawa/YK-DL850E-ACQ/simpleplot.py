@@ -102,12 +102,6 @@ def plot_tf(f, save_dir, filename="someFile.png"):
         print(e)
         df = pd.read_excel(f, sheet_name=None)
         return 0
-    
-
-    
-    # freq = df['frequency'].to_numpy()
-    # top = df['channel1'].to_numpy()
-    # bot = df['channel2'].to_numpy()
 
     x = df.iloc[:,0].to_numpy()
     normalized = df.iloc[:,3].to_numpy()
@@ -130,7 +124,7 @@ def plot_tf(f, save_dir, filename="someFile.png"):
     #plt.plot(df["frequency"], df["channel1"])
     #plt.plot(df["frequency"], df["normalized"])
     plt.loglog()
-    plt.xlabel("Frequency")
+    plt.xlabel("Frequency [Hz]")
     plt.ylabel("Signal") # Attenuation
     
     title = get_filename(f)

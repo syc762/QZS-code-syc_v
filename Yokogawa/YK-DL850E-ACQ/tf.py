@@ -12,7 +12,7 @@ import pandas as pd
 from datetime import datetime
 from tkinter import Tk
 from tkinter.filedialog import asksaveasfilename
-from simpleplot import plot_tf
+from simpleplot import get_filename
 
 
 # Globals
@@ -255,7 +255,7 @@ class tf:
         self.yk.write(':TIMebase:TDIV ' + time_div)
     
         ##### *!* 
-        # Waveform setting initialization 
+        # Waveform settings 
         for c in self.channel:
             self.yk.write(':WAVeform:TRACE ' + str(c))
         result = self.yk.query('WAVEFORM:RECord? MINimum')
@@ -318,18 +318,9 @@ class tf:
 
             acceleration_data = 9.81 / 10 * voltage_data / 100
             time_data = np.array(range(len(acceleration_data))) / sampling_rate
-            # print("Time data at this iteration:")
-            # print(time_data)
-            # Compute the displacement using ut + 1/2*at^2
-            # Amount of time passed to collect this data: t = time_data[-1]
-            # Velocity measured at that point in time is equal to: v[-1]
 
             
-
-            # Calculate position power spectral density
-
-            
-            # Calculate the position power spectral density using one of three methods:
+            # Calculate the position power spectral density using welch or periodogram:
             if type == 'welch':
 
                 freq, psd_acc = sc.signal.welch(acceleration_data, fs=sampling_rate, nperseg=sampling_rate, window='blackman',noverlap=0)       
@@ -368,8 +359,6 @@ class tf:
     def __measurement_cycle(self, frequency, num_iterations, time_div, bin_size=1):
         
         means = []
-        # stds = []
-        acc_data = []
 
         self.ag.write('FREQuency ' + str(frequency))
         self.ag.write('OUTPut ON')
@@ -402,11 +391,10 @@ class tf:
             # Method to collect acceleration data here
             means.append(np.mean(measurement_values))
             # stds.append(np.std(measurement_values))
-            # acc_data.append(acceleration_data)
             
         self.ag.write('OUTPut OFF')
 
-        return means #, stds ### [channel1_mean, channel2_mean], [std1, std2]
+        return means
 
 
     ##### *!* Channels
@@ -420,7 +408,7 @@ class tf:
         # acc_norm = []
         # pos_norm = []
 
-        # !!! NO channel information applied here!
+        # NO channel information applied here!
         for freq, it, t in tqdm(zip(frequencies, iterations, time_div)):
 
             mean = self.__measurement_cycle(freq, it, t, bin_size=bin_size)
@@ -444,24 +432,40 @@ class tf:
 def plot_tf_from_df(df, filename, save_dir): # Need to change which column it's referring to based on the old excel plots
     
     x = df.iloc[:,0].to_numpy()
-    
-    Vin = df.iloc[:,1].to_numpy() 
-    Vout = df.iloc[:,2].to_numpy()
     normalized = df.iloc[:,3].to_numpy()
+
+    if 'channel1' in df.columns:
+        V_out = df.iloc[:,1].to_numpy() 
+        V_in = df.iloc[:,2].to_numpy()
+    elif 'V_in' in df.columns:
+        V_out = df['V_out'].to_numpy()
+        V_in = df['V_in'].to_numpy()
+    else:
+        print(f"Error reading in columns, check the column names")
+        return 1
+    
     # Labels used in the past: label="$V_{in}$", "$V_{out}$"
-    plt.plot(x, Vin, label="$V_{in}$", c="orange", marker='.', linestyle='dashed')
-    plt.plot(x, Vout, label="$V_{out}$", c="mediumblue", marker='.', linestyle='dashed')
-    plt.plot(x, normalized, label ="$|V_{out}/V_{in}|$", c="cornflowerblue", marker='.', linestyle='solid')
+    plt.plot(x, normalized, label ="$|V_{out}/V_{in}|$", c="darkorange", marker='.', linestyle='solid')
+    plt.plot(x, V_in, label="$V_{in}$", c="cornflowerblue", marker='.', linestyle='dashed')
+    plt.plot(x, V_out, label="$V_{out}$", c="mediumblue", marker='.', linestyle='dashed')
     #plt.plot(df["frequency"], df["channel2"])
     #plt.plot(df["frequency"], df["channel1"])
     #plt.plot(df["frequency"], df["normalized"])
     plt.loglog()
-    plt.xlabel("Frequency")
-    plt.ylabel("Signal") # Attenuation
-    plt.title("Transfer Function")
+    plt.xlabel("Frequency [Hz]")
+    plt.ylabel("Vout/Vin")
     plt.legend()
-    plt.savefig(os.path.join(save_dir, filename+".png"))
+    
+    title = get_filename(filename)
+    wrapped_title = textwrap.fill(title, width=52)
+    plt.title(wrapped_title, fontsize=11, wrap=True) # Attenuation
+        
+    try:
+        plt.savefig(os.path.join(save_dir, filename), transparent=True, bbox_inches='tight')
+    except Exception as e:
+        print(e)
     plt.close()
+
 
 ### Beginning of Main ###
 

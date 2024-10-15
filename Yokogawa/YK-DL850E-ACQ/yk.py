@@ -26,7 +26,7 @@ def extract_number(string):
 
 def average_reduce(array, factor):
     if isinstance(array, np.ndarray):
-        array = array.tolist()  # Convert NumPy array to Python list
+        array = array.tolist()  
 
     reduced_array = []
     i = 0
@@ -83,14 +83,16 @@ class acq:
     
 
     def _initialize_oscilloscope(self, yk):
+
+        # Yokogawa initialization
         yk.write(':STOP')
         yk.write(':WAVEFORM:FORMAT WORD')
         yk.write(':WAVEFORM:BYTEORDER LSBFIRST')
         
+        # Yokogawa initialization: query and set the current sampling rate
+        sampling_rate = extract_number(yk.query(':WAVeform:SRATe?'))
 
-    # Currently, the run() function contains initialization steps and yk.close()
-    def run(self, yk):
-
+        # Initialize the instance of the acq object
         flag = True
         self.channel_data = {}
         self.prog = {
@@ -99,14 +101,15 @@ class acq:
         }
         for channel in self.channels:
             self.channel_data[channel] = None
+        
+        # Initialize each of the channels
+
+
+    # Currently, the run() function contains initialization steps and yk.close()
+    def run(self, yk):
 
         
-        
-
-        yk.write(':STOP')
-        yk.write(':WAVEFORM:FORMAT WORD')
-        yk.write(':WAVEFORM:BYTEORDER LSBFIRST')
-        yk.write(':WAVeform:FORMat WORD')
+        # Some initialization of yk needed here
 
         for channel in self.channels:
             if flag:
@@ -252,16 +255,18 @@ class acq:
             self.channel_data[self.channels[1]]['force (N)'] = y
             self.channel_data[self.channels[1]]['distance (mm)'] = []
 
+            # Currently averages the data in chunks after collection
             x_reduced = average_reduce(x, 100)
             y_reduced = average_reduce(y, 100)
+
             fig = go.Figure(data=go.Scatter(
                 x=x_reduced,
                 y=y_reduced,
                 mode='lines'))
             fig.update_layout(
                 title_text='Force vs Distance',
-                xaxis_title='Distance (mm)',
-                yaxis_title='Force (N)')
+                xaxis_title='Distance [mm]',
+                yaxis_title='Force [N]')
             figs.append(fig)
         return figs
 
