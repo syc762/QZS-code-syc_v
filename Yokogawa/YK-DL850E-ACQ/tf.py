@@ -3,6 +3,7 @@ import re
 import numpy as np
 import scipy as sc
 import matplotlib.pyplot as plt
+import textwrap
 from tqdm import tqdm
 import time
 import sys
@@ -77,13 +78,6 @@ def save_data_to_csv(data, label, save_dir):
             tag ="frequency"
         else:
             tag = "channel" + str(i)
-
-        #elif i%2 == 0 and i!=0:
-        #    tag = "std_" + str(i)
-        #elif i%2 == 1:
-        #    tag ="mean_" + str(i)
-        #else:
-        #    tag = ""
 
         var_name = tag # + f"_variable_{i+1} "
         data_dict[var_name] = arr
