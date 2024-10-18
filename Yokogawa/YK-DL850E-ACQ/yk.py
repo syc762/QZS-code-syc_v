@@ -208,8 +208,18 @@ class acq:
             print('Channel completed')
         self.yk.close()
 
+    # Assumes that the oscilloscope inputs are known and fixed
     def save(self, label, save_dir):
         df = pd.DataFrame({key: value['t_volt'] for key, value in self.channel_data.items()})
+
+        # Relabel the columns, based on the mode
+        if 'X vs Y' in self.mode:
+            # Specify the column renaming
+            new_column_names = {1: 'channel1 - load cell', 2: 'channel2 - disp. sensor'}
+
+            # Rename the columns
+            df = df.rename(columns=new_column_names)
+
 
         # Generate a timestamp for the file name
         timestamp = datetime.now().strftime('%Y%m%d%H%M')
@@ -293,14 +303,17 @@ class acq:
 
         if 'X vs Y' in self.mode:
 
-            # Get the distance data and empty the corresponding self.channels array
+            # Get the distance data and process it to get the correct values
             x = -7.766 * np.array(self.channel_data[self.channels[0]]['t_volt'])
             x = x - np.min(x)
             self.channel_data[self.channels[1]]['distance (mm)'] = x
             #self.channel_data[self.channels[1]]['force (N)'] = []
 
-            # Get the force data and empty the corresponding self.channels array
-            y = 4.108 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 4.547)
+            # Get the force data and process it to get the correct values
+            #y = 4.108 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 4.547)
+            # y = 9.81 * 8.1 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 5.0715)
+            y = 9.81 * (1.2506 * np.array(self.channel_data[self.channels[1]]['t_volt']) - 0.6525)
+
             self.channel_data[self.channels[0]]['force (N)'] = y
             #self.channel_data[self.channels[1]]['distance (mm)'] = []
 
