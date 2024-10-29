@@ -64,6 +64,7 @@ class acq:
         self.channel_data = {}
         self.mode = mode
         self.amp_gain = amp_gain
+        self.volt = 4.0 # The total voltage applied to the displacement sensor (Needed to compute the distance traveled)
 
     def open_instruments(self) -> Optional[pyvisa.resources.MessageBasedResource]:
         rm = pyvisa.ResourceManager()
@@ -304,15 +305,23 @@ class acq:
         if 'X vs Y' in self.mode:
 
             # Get the distance data and process it to get the correct values
-            x = -7.766 * np.array(self.channel_data[self.channels[0]]['t_volt'])
+            # x = -7.766 * np.array(self.channel_data[self.channels[0]]['t_volt'])
+            x = -38.1/self.volt * np.array(self.channel_data[self.channels[0]]['t_volt'])
             x = x - np.min(x)
             self.channel_data[self.channels[1]]['distance (mm)'] = x
             #self.channel_data[self.channels[1]]['force (N)'] = []
 
-            # Get the force data and process it to get the correct values
+            # Get the force data in Newtons and process it to get the correct values
             #y = 4.108 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 4.547)
             # y = 9.81 * 8.1 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 5.0715)
+            
+            # Assuming a linear relation between output voltage range and measurable force range
+            # y = 4.44822162 * (0.25 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 1.25)
+
+            ### Grams to Newtons, calibration with the weights
             y = 9.81 * (1.2506 * np.array(self.channel_data[self.channels[1]]['t_volt']) - 0.6525)
+
+
 
             self.channel_data[self.channels[0]]['force (N)'] = y
             #self.channel_data[self.channels[1]]['distance (mm)'] = []
