@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 import pyvisa
 import re
 import numpy as np
@@ -12,6 +13,16 @@ from typing import Optional
 import plotly.io as pio
 import pandas as pd
 
+#####
+## Things to change
+#####
+# record_length = 1k
+# sampling rate = 5 samples / sec
+# acquisition mode = normal
+# record time = 200s
+# Timebase - 20s / div
+
+sys.set_int_max_str_digits(400000) 
 
 def extract_number(string):
     pattern = r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?'
@@ -55,120 +66,167 @@ def get_devices():
 
 
 class acq:
-    def __init__(self, chunkSize = int(1E5), channels=[1,2], mode=['X vs Y'], amp_gain=1):
-        self.prog = {}
+    def __init__(self, chunkSize = int(1E5), channels=[1,2], mode=['X vs Y'], amp_gain=1,
+                 volt=None,
+                 acquisition_time=None, sampling_rate=None, record_length=None,
+                 noise_period_ms=41.67):
+        """
+        Initialize the acq Data collector with time control options.
+
+        Args:
+            
+        """
+
         self.yokogawaAddress = 'USB0::0x0B21::0x003F::39314B373135373833::INSTR'
         self.yk = None
         self.chunkSize = chunkSize
         self.channels = channels
-        self.channel_data = {}
+        self.channel_data = {channel: None for channel in channels}
         self.mode = mode
         self.amp_gain = amp_gain
-        self.volt = 4.0 # The total voltage applied to the displacement sensor (Needed to compute the distance traveled)
+        self.prog = {
+            'iteration': 1,
+            'prog': 0
+        }
+        # Parameters that will vary by measurement
+        self.volt = volt, # The total voltage applied to the displacement sensor (Needed to compute the distance traveled)
+        self.acquisition_time = acquisition_time # Desired acquisition time in seconds
+        self.sampling_rate = sampling_rate # Desired sampling rate in Hz
+        self.record_length = record_length # Desired number of points to collect 
+        self.noise_period_ms = noise_period_ms # Period of noise to filter out in milliseconds
+
+        # Configure logging
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        self.logger = logging.getLogger(__name__)
+
 
     def open_instruments(self) -> Optional[pyvisa.resources.MessageBasedResource]:
         rm = pyvisa.ResourceManager()
         resources = rm.list_resources()
             
         if self.yokogawaAddress not in resources:
-            print(f"Error: Yokogawa oscilloscope not found")
-            print("Available resources:", resources)
+            logging.info(f"Error: Yokogawa oscilloscope not found")
+            logging.info("Available resources:", resources)
             return None
 
         try:
             self.yk = rm.open_resource(self.yokogawaAddress)
-            print(f"Successfully opened Yokogawa oscilloscope at {self.yokogawaAddress}")
+            logging.info(f"Successfully opened Yokogawa oscilloscope at {self.yokogawaAddress}")
             # return self.yokogawaInstrument
             
         except pyvisa.errors.VisaIOError as e:
-            print(f"Error opening Yokogawa oscilloscope: {e}")
+            logging.info(f"Error opening Yokogawa oscilloscope: {e}")
             return None
     
 
 
-    def _initialize_oscilloscope(self, sample_rate='10k', time_div='2s'):
+    def _initialize_oscilloscope(self, sampling_rate='5000', time_div='1s', acquisition_time=20):
 
-        # Initialize the instance of the acq object
-        self.channel_data = {}
-        self.prog = {
-            'iteration': 1,
-            'prog': 0
-        }
-
-        # Yokogawa initialization
+        # Initialize an instance of the acq object
+        
+        # Ensure a fresh restart
         self.yk.write(':STOP')
         self.yk.write(':WAVEFORM:FORMAT WORD')
         self.yk.write(':WAVEFORM:BYTEORDER LSBFIRST')
         
         # General Timebase settings
-        self.yk.write(':TIMebase:TDIV ' + '1s')
-        self.yk.write(':TIMebase:SRATe' + sample_rate)
-        # self.yk.write(':TIMebase:TDIV ' + time_div)
+        self.yk.write(':TIMebase:TDIV ' + time_div)
         
+        # @>-->----- Set the sampling rate
+        self.yk.write(':TIMebase:SRATe' + sampling_rate)
+        logging.info(f"Finished setting the desired sampling rate: {sampling_rate} Hz")
+        print(f"Finished setting the desired time division: {time_div}" )
+        self.sampling_rate = extract_number(sampling_rate)
+
+        
+        # When only acquisition time is given
+        # Round to the nearest valid record length. p.5-30 in the communications manual
+        print(f"The acquisition time is currently: {self.acquisition_time} ms")
+        print(f"The record length is currently: {self.record_length}")
+        if self.acquisition_time is None and self.record_length is None:
+            print("Inside the if statement")
+            required_points = int(acquisition_time * self.sampling_rate)
+            valid_lengths = [1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000, 2500000,
+             5000000, 10000000, 25000000, 50000000, 100000000]
+            closest_length = min(valid_lengths, key=lambda x: abs(x-required_points))
+            self.yk.write(f':ACQuire:RLENgth {closest_length}')
+            actual_acquisition_time = closest_length/self.sampling_rate
+            self.acquisition_time = actual_acquisition_time
+            
+
+            print(f"Finished setting record length to {closest_length} points")
+            print(f"Requested acquisition time: {acquisition_time}ms")
+            print(f"Actual acquisition time: {actual_acquisition_time:.3f}ms")
+        
+
+        # Set up acquisition mode to averaging
+        ### @>->---
+        self.logger.info(f"Noise period in ms: {self.noise_period_ms}")
+
+        self.logger.info(f"Sampling rate: {self.sampling_rate}")
+
+        self.logger.info(f"Chunk size: {self.chunkSize}")
+
+        self.yk.write(':ACQuire:MODE NORMALS')
+        
+        # Initialize each of the channels
         for channel in self.channels:
-            self.channel_data[channel] = None
+            
             self.yk.write(':WAVeform:TRACE ' + str(channel))
             result = self.yk.query('WAVEFORM:RECord? MINimum')
             min_record = int(extract_number(result))
             self.yk.write(':WAVeform:RECord ' + str(min_record))
         
-        # Initialize each of the channels
-
-
     
-    def initialize_instruments(self, sample_rate, time_div):
-        self._initialize_oscilloscope(sample_rate, time_div)
+    def initialize_instruments(self, sampling_rate, time_div, acquisition_time):
+        self._initialize_oscilloscope(sampling_rate, time_div, acquisition_time)
 
+
+    # Verify that the sampling rate matches the expected value.
+    def _verify_sampling_rate(self):
+        
+        actual_rate = extract_number(self.yk.query(':TIMebase:SRATe?'))
+        
+        if self.sampling_rate and actual_rate != self.sampling_rate:
+            self.logger.warning(
+                f"Sampling rate mismatch - Expected: {self.sampling_rate} Hz, "
+                f"Actual: {actual_rate} Hz"
+            )
+        return actual_rate
 
     # Currently, the run() function contains initialization steps and yk.close()
     def run(self):
 
-        flag = True
-        self.yk.write(':TIMebase:SRATe' + sample_rate)
-        result = self.yk.query(':WAVeform:SRATe?')  # Get sampling rate
-        sampling_rate = extract_number(result)
-
-        # Some initialization of yk needed here
+        # Check that the sampling rate is what was specified, and use the sampling rate in the oscilloscope if it is different
+        sampling_rate = self._verify_sampling_rate()
+        
 
         for channel in self.channels:
-            if flag:
 
-                print("set length")
-                length = int(extract_number(self.yk.query(':WAVEFORM:LENGth?')))
-                print("the length of the waveform is:" + str(length))
-                print("THE waveform capture length is: " + str(self.yk.query(":WAVEFORM:CAPTure:LENGth?")))
+            self.logger.info(f"Processing channel {channel}")
+            length = int(extract_number(self.yk.query(':WAVEFORM:LENGth?')))
+            
+            data = {}
 
-                print("Waveform:start is " + str(self.yk.query(":WAVeform:STARt?")))
-                print("Waveform:end is " + str(self.yk.query(":WAVeform:END?")))
+            print("Defining n")
+            n = int(np.floor(length / self.chunkSize))
+            t_data = []
+
+
+            for i in tqdm(range(n + 1)):
                 
-    
-                # Calculate the time
-                #time_length = (end - start) / sample_rate
-                print("the queried sample rate: " + str(sampling_rate))
+                m = min(length, (i + 1) * self.chunkSize) - 1
 
-            if flag:
-
-                data = {}
-
-                print("Defining n")
-                n = int(np.floor(length / self.chunkSize))
-                t_data = []
-
-                print("starting the for loop for tqdm")
-                for i in tqdm(range(n + 1)):
-                    
-                    m = min(length, (i + 1) * self.chunkSize) - 1
-
-                    print("Set the start and end data point in the waveform")
-                    
-                    self.yk.write(":WAVEFORM:START {};:WAVEFORM:END {}".format(i * self.chunkSize, m))
+                print("Set the start and end data point in the waveform")
+                
+                self.yk.write(":WAVEFORM:START {};:WAVEFORM:END {}".format(i * self.chunkSize, m))
 
 
-                    print("query binary values")
-                    buff = self.yk.query_binary_values(':WAVEFORM:SEND?', datatype='h', container=list)
+                print("query binary values")
+                buff = self.yk.query_binary_values(':WAVEFORM:SEND?', datatype='h', container=list)
 
-                    t_data.extend(buff)
-                    self.prog['prog'] = (i + 1) / (n + 1)
+                t_data.extend(buff)
+                self.prog['prog'] = (i + 1) / (n + 1)
                 
                 # Query the waveform offset
                 result = self.yk.query(':WAVEFORM:OFFSET?')
@@ -207,6 +265,7 @@ class acq:
                 self.channel_data[channel] = data
             self.prog['iteration'] += 1
             print('Channel completed')
+
         self.yk.close()
 
     # Assumes that the oscilloscope inputs are known and fixed
@@ -306,7 +365,8 @@ class acq:
 
             # Get the distance data and process it to get the correct values
             # x = -7.766 * np.array(self.channel_data[self.channels[0]]['t_volt'])
-            x = -38.1/self.volt * np.array(self.channel_data[self.channels[0]]['t_volt'])
+            print(str(self.volt[0]))
+            x = -38.1/self.volt[0] * np.array(self.channel_data[self.channels[0]]['t_volt']) # Change from negative to positive
             x = x - np.min(x)
             self.channel_data[self.channels[1]]['distance (mm)'] = x
             #self.channel_data[self.channels[1]]['force (N)'] = []
@@ -316,7 +376,7 @@ class acq:
             # y = 9.81 * 8.1 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 5.0715)
             
             # Assuming a linear relation between output voltage range and measurable force range
-            # y = 4.44822162 * (0.25 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 1.25)
+            y = 4.44822162 * (0.25 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 1.25))
 
             ### Grams to Newtons, calibration with the weights
             y = 9.81 * (1.2506 * np.array(self.channel_data[self.channels[1]]['t_volt']) - 0.6525)
@@ -367,28 +427,42 @@ if __name__ == "__main__":
     save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
 
     # Parameters (The sample rate is not being reflected in the settings, defaults to 1kHz. Why?)
-    sample_rate='10000Hz'
+    desired_sample_rate='10000'
+    desired_acquisition_time_ms=80000 # milliseconds
+    # record_length is not specified
+    noise_period_ms=41.67
 
     force_cal_params = []
     dis_cal_params = []
 
     print("Test F vs. D acquisition")
-    acq=acq()
-    acq.open_instruments()
-    acq.initialize_instruments(sample_rate=sample_rate, time_div='2s')
+    osc=acq(
+        channels=[1,2],
+        mode=['X vs Y'],
+        volt=4.0
+    )
+
+    osc.open_instruments()
+
+    # During the initialization, osc object's sampling_rate and other variables will get updated
+    osc.initialize_instruments(sampling_rate=desired_sample_rate,
+                               time_div='200s',
+                               acquisition_time=desired_acquisition_time_ms)
+    print("After initialization, the acquisition time is ")
+    print(osc.acquisition_time)
 
     print("Running the measurement")
 
 
     try:
-        acq.run()
+        osc.run()
     except Exception as e:
         print(f"Error opening running Yokogawa oscilloscope: {e}")
 
-    print(acq.channel_data)
-    figs = acq.plot()
+    print(osc.channel_data)
+    figs = osc.plot()
     save_figures(figs)
-    acq.save('test_FvsD', save_dir)
+    osc.save('test_FvsD', save_dir)
     
     # dataframe = acq.save_data_to_csv(save_dir)
 
