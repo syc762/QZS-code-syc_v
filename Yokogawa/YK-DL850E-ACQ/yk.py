@@ -17,8 +17,6 @@ import pandas as pd
 ## Things to change
 #####
 # record_length = 1k
-# sampling rate = 5 samples / sec
-# acquisition mode = normal
 # record time = 200s
 # Timebase - 20s / div
 
@@ -69,12 +67,19 @@ class acq:
     def __init__(self, chunkSize = int(1E5), channels=[1,2], mode=['X vs Y'], amp_gain=1,
                  volt=None,
                  acquisition_time=None, sampling_rate=None, record_length=None,
-                 noise_period_ms=41.67):
+                 noise_period_ms=None):
         """
         Initialize the acq Data collector with time control options.
 
         Args:
-            
+            yokogawaAddress - the usb port to which the yokogawa is connected
+            yk - the oscilloscope object
+            chunkSize - increment size for progress bar update
+            channels - the channels to collect data from
+            channel_data - data collected from each channel, in the form of a dictionary
+            mode - the type of data collection to perform
+            amp_gain - the amplification factor
+            prog - the progress of the data collection
         """
 
         self.yokogawaAddress = 'USB0::0x0B21::0x003F::39314B373135373833::INSTR'
@@ -120,7 +125,7 @@ class acq:
     
 
 
-    def _initialize_oscilloscope(self, sampling_rate='5000', time_div='1s', acquisition_time=20):
+    def _initialize_oscilloscope(self, sampling_rate, time_div, record_length):
 
         # Initialize an instance of the acq object
         
@@ -131,33 +136,18 @@ class acq:
         
         # General Timebase settings
         self.yk.write(':TIMebase:TDIV ' + time_div)
-        
+        logging.info(f"Finished setting the desired time division: {time_div}" )
         # @>-->----- Set the sampling rate
-        self.yk.write(':TIMebase:SRATe' + sampling_rate)
+        self.yk.write(':TIMebase:SRATe ' + sampling_rate)
         logging.info(f"Finished setting the desired sampling rate: {sampling_rate} Hz")
-        print(f"Finished setting the desired time division: {time_div}" )
+        queried_srate = self.yk.query(':TIMebase:SRATe?')
+        logging.info(f"Queried sampling rate: {queried_srate}")
+        
         self.sampling_rate = extract_number(sampling_rate)
 
-        
-        # When only acquisition time is given
-        # Round to the nearest valid record length. p.5-30 in the communications manual
-        print(f"The acquisition time is currently: {self.acquisition_time} ms")
-        print(f"The record length is currently: {self.record_length}")
-        if self.acquisition_time is None and self.record_length is None:
-            print("Inside the if statement")
-            required_points = int(acquisition_time * self.sampling_rate)
-            valid_lengths = [1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000, 2500000,
-             5000000, 10000000, 25000000, 50000000, 100000000]
-            closest_length = min(valid_lengths, key=lambda x: abs(x-required_points))
-            self.yk.write(f':ACQuire:RLENgth {closest_length}')
-            actual_acquisition_time = closest_length/self.sampling_rate
-            self.acquisition_time = actual_acquisition_time
-            
-
-            print(f"Finished setting record length to {closest_length} points")
-            print(f"Requested acquisition time: {acquisition_time}ms")
-            print(f"Actual acquisition time: {actual_acquisition_time:.3f}ms")
-        
+        # Set the record length
+        self.yk.write(':WAVeform:RECordlength ' + str(record_length))
+       
 
         # Set up acquisition mode to averaging
         ### @>->---
@@ -178,8 +168,8 @@ class acq:
             self.yk.write(':WAVeform:RECord ' + str(min_record))
         
     
-    def initialize_instruments(self, sampling_rate, time_div, acquisition_time):
-        self._initialize_oscilloscope(sampling_rate, time_div, acquisition_time)
+    def initialize_instruments(self, sampling_rate, time_div, record_length):
+        self._initialize_oscilloscope(sampling_rate, time_div, record_length)
 
 
     # Verify that the sampling rate matches the expected value.
@@ -427,9 +417,9 @@ if __name__ == "__main__":
     save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
 
     # Parameters (The sample rate is not being reflected in the settings, defaults to 1kHz. Why?)
-    desired_sample_rate='10000'
+    desired_sample_rate='5Hz' # Try 5 samples / sec
     desired_acquisition_time_ms=80000 # milliseconds
-    # record_length is not specified
+    record_length = 1000
     noise_period_ms=41.67
 
     force_cal_params = []
@@ -439,15 +429,16 @@ if __name__ == "__main__":
     osc=acq(
         channels=[1,2],
         mode=['X vs Y'],
-        volt=4.0
+        volt=4.0,
+        noise_period_ms=noise_period_ms
     )
 
     osc.open_instruments()
 
     # During the initialization, osc object's sampling_rate and other variables will get updated
     osc.initialize_instruments(sampling_rate=desired_sample_rate,
-                               time_div='200s',
-                               acquisition_time=desired_acquisition_time_ms)
+                               time_div='20s',
+                               record_length=1000)
     print("After initialization, the acquisition time is ")
     print(osc.acquisition_time)
 
