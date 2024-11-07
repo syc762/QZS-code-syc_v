@@ -1,5 +1,4 @@
 import os
-import sys
 import logging
 import pyvisa
 import re
@@ -7,11 +6,13 @@ import numpy as np
 import math
 import plotly.graph_objects as go
 import scipy as sc
+from collections import namedtuple
 from tqdm import tqdm
 from datetime import datetime
 from typing import Optional
 import plotly.io as pio
 import pandas as pd
+
 
 #####
 ## Things to change
@@ -19,8 +20,6 @@ import pandas as pd
 # record_length = 1k
 # record time = 200s
 # Timebase - 20s / div
-
-sys.set_int_max_str_digits(400000) 
 
 def extract_number(string):
     pattern = r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?'
@@ -75,7 +74,7 @@ class acq:
             yokogawaAddress - the usb port to which the yokogawa is connected
             yk - the oscilloscope object
             chunkSize - increment size for progress bar update
-            channels - the channels to collect data from
+            channels - the channels to collect data from, in the form of a dictionary {channel type: channel number}
             channel_data - data collected from each channel, in the form of a dictionary
             mode - the type of data collection to perform
             amp_gain - the amplification factor
@@ -134,30 +133,28 @@ class acq:
         self.yk.write(':WAVEFORM:FORMAT WORD')
         self.yk.write(':WAVEFORM:BYTEORDER LSBFIRST')
         
-        # General Timebase settings
+        ###### General Timebase settings
+        # Set the time division
         self.yk.write(':TIMebase:TDIV ' + time_div)
         logging.info(f"Finished setting the desired time division: {time_div}" )
-        # @>-->----- Set the sampling rate
-        self.yk.write(':TIMebase:SRATe ' + sampling_rate)
-        logging.info(f"Finished setting the desired sampling rate: {sampling_rate} Hz")
-        queried_srate = self.yk.query(':TIMebase:SRATe?')
-        logging.info(f"Queried sampling rate: {queried_srate}")
         
+        # Set the sampling rate
+        self.yk.write(':TIMebase:SRATe ' + sampling_rate)
+        logging.info(f"Finished setting the desired sampling rate: {sampling_rate}")
         self.sampling_rate = extract_number(sampling_rate)
 
         # Set the record length
         self.yk.write(':WAVeform:RECordlength ' + str(record_length))
        
 
-        # Set up acquisition mode to averaging
-        ### @>->---
-        self.logger.info(f"Noise period in ms: {self.noise_period_ms}")
+        # Set acquisition mode
+        self.yk.write(':ACQuire:MODE NORMAL')
 
-        self.logger.info(f"Sampling rate: {self.sampling_rate}")
+
+        self.logger.info(f"Noise period in ms: {self.noise_period_ms}")
 
         self.logger.info(f"Chunk size: {self.chunkSize}")
 
-        self.yk.write(':ACQuire:MODE NORMALS')
         
         # Initialize each of the channels
         for channel in self.channels:
@@ -209,24 +206,25 @@ class acq:
 
                 print("Set the start and end data point in the waveform")
                 
+                # Capturing each chunk of data
                 self.yk.write(":WAVEFORM:START {};:WAVEFORM:END {}".format(i * self.chunkSize, m))
+                waveform_srate = self.yk.query(':WAVeform:SRATe?')  # Get sampling rate
+                sampling_rate = extract_number(waveform_srate)
 
-
-                print("query binary values")
                 buff = self.yk.query_binary_values(':WAVEFORM:SEND?', datatype='h', container=list)
 
                 t_data.extend(buff)
                 self.prog['prog'] = (i + 1) / (n + 1)
                 
                 # Query the waveform offset
-                result = self.yk.query(':WAVEFORM:OFFSET?')
-                offset = extract_number(result)
+                waveform_offset = self.yk.query(':WAVEFORM:OFFSET?')
+                offset = extract_number(waveform_offset)
 
                 # Query the waveform range
-                result = self.yk.query(':WAVeform:RANGe?')
-                w_range = extract_number(result)
+                waveform_range = self.yk.query(':WAVeform:RANGe?')
+                w_range = extract_number(waveform_range)
 
-                print("THE waveform capture length is: " + str(self.yk.query(":WAVEFORM:CAPTure:LENGth?")))
+                print("THE waveform capture length is: " + str(self.yk.query(":WAVEFORM:LENGth?")))
                 # Convert the raw waveform range data to t_data
                 t_data = w_range * np.array(t_data, dtype=float) * 10.0 / 24000.0 + offset  # some random bullshit formula in the communication manual
 
@@ -353,32 +351,41 @@ class acq:
 
         if 'X vs Y' in self.mode:
 
-            # Get the distance data and process it to get the correct values
-            # x = -7.766 * np.array(self.channel_data[self.channels[0]]['t_volt'])
-            print(str(self.volt[0]))
-            x = -38.1/self.volt[0] * np.array(self.channel_data[self.channels[0]]['t_volt']) # Change from negative to positive
-            x = x - np.min(x)
-            self.channel_data[self.channels[1]]['distance (mm)'] = x
-            #self.channel_data[self.channels[1]]['force (N)'] = []
+            # Y is force
+            force_channel = self.channels['force']
+            print(f"force_channel: {force_channel}" )
 
-            # Get the force data in Newtons and process it to get the correct values
-            #y = 4.108 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 4.547)
-            # y = 9.81 * 8.1 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 5.0715)
+            # X is displacement
+            disp_channel = self.channels['displacement']
+            print(f"disp_channel: {disp_channel}" )
+
+            ###### Get the force data in Newtons and process it to get the correct values
+            #### Old formula:
+            # y = 4.108 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 4.547)
             
-            # Assuming a linear relation between output voltage range and measurable force range
-            y = 4.44822162 * (0.25 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 1.25))
+            #### Updated formulas: Assuming a linear relation between output voltage range and measurable force range
+            
+            # Manual
+            y = 4.44822162 * (0.25 * (np.array(self.channel_data[self.channels[0]]['t_volt']) - 1.25))
 
-            ### Grams to Newtons, calibration with the weights
-            y = 9.81 * (1.2506 * np.array(self.channel_data[self.channels[1]]['t_volt']) - 0.6525)
-
-
+            # Grams to Newtons, calibration with the weights
+            # y = 9.81 * (1.2506 * np.array(self.channel_data[self.channels[1]]['t_volt']) - 0.6525)
 
             self.channel_data[self.channels[0]]['force (N)'] = y
             #self.channel_data[self.channels[1]]['distance (mm)'] = []
 
+            ###### Get the distance data in mm and process it to get the correct values
+            #### Old formula:
+            # x = -7.766 * np.array(self.channel_data[self.channels[0]]['t_volt'])
+
+            # Using the electrical travel range omf 38.1mm, setting full compression = 0mm, no compression = -38.1mm
+            x = -38.1/self.volt[0] * np.array(self.channel_data[self.channels[1]]['t_volt'])
+            x = x - np.min(x)
+            self.channel_data[self.channels[1]]['distance (mm)'] = x
+
             # Currently averages the data in chunks after collection
-            x_reduced = average_reduce(x, 10)
-            y_reduced = average_reduce(y, 10)
+            x_reduced = average_reduce(x, 1)
+            y_reduced = average_reduce(y, 1)
 
             fig = go.Figure(data=go.Scatter(
                 x=x_reduced,
@@ -418,8 +425,8 @@ if __name__ == "__main__":
 
     # Parameters (The sample rate is not being reflected in the settings, defaults to 1kHz. Why?)
     desired_sample_rate='5Hz' # Try 5 samples / sec
-    desired_acquisition_time_ms=80000 # milliseconds
-    record_length = 1000
+    # desired_acquisition_time_ms=80000 # milliseconds
+    record_length = 10000
     noise_period_ms=41.67
 
     force_cal_params = []
@@ -427,9 +434,9 @@ if __name__ == "__main__":
 
     print("Test F vs. D acquisition")
     osc=acq(
-        channels=[1,2],
+        channels={'force':1, 'displacement':2},
         mode=['X vs Y'],
-        volt=4.0,
+        volt=0.2,
         noise_period_ms=noise_period_ms
     )
 
