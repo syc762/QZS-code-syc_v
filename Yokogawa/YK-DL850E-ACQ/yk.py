@@ -1,4 +1,5 @@
 import os
+import pint
 import logging
 import pyvisa
 import re
@@ -24,6 +25,9 @@ import pandas as pd
 
 # Channel named tuple
 Channel = namedtuple('Channel', ['port', 'data_type', 'data'])
+
+# Globals
+ureg = pint.UnitRegistry()
 
 
 def extract_number(string):
@@ -54,6 +58,17 @@ def average_reduce(array, factor):
     return reduced_array
 
 
+# converts time SI string to float
+def convert_to_seconds(time_string):
+    try:
+        int_time = ureg(time_string)
+        return int_time.to('second').magnitude
+    except pint.errors.UndefinedUnitError:
+        raise ValueError('Invalid unit')
+    except pint.errors.DimensionalityError:
+        raise ValueError('Invalid time string')
+
+
 def damping_func(t, A, l, w, p):
     return A * np.exp(-1 * l * t) * np.cos(w * t - p)
 
@@ -67,7 +82,7 @@ def get_devices():
         return ['No devices found!']
 
 class acq:
-    def __init__(self, chunkSize = int(1E5), channels=[1,2], mode=['X vs Y'], amp_gain=1,
+    def __init__(self, chunkSize = int(1E3), channels=[1,2], mode=['X vs Y'], amp_gain=1,
                  volt=None,
                  acquisition_time=None, sampling_rate=None, record_length=None,
                  noise_period_ms=None):
@@ -170,7 +185,7 @@ class acq:
         for channel in self.channels:
             
             self.yk.write(':WAVeform:TRACE ' + str(channel.port))
-            result = self.yk.query('WAVEFORM:RECord? MINimum')
+            result = self.yk.query(':WAVEFORM:RECord? MINimum')
             min_record = int(extract_number(result))
             self.yk.write(':WAVeform:RECord ' + str(min_record))
         
@@ -206,6 +221,13 @@ class acq:
         chunks_per_channel = int(np.floor(length / self.chunkSize)) # No plus 1
         total_iterations = total_channels * chunks_per_channel
         
+        # Waveform capture sequence
+        acquisition_time = self.record_length/sampling_rate
+        self.logger.info(f"Oscilloscope will be acquiring datas for: {acquisition_time:.2f} seconds")
+        self.yk.write(':START')
+        time.sleep(acquisition_time)
+        self.yk.write(':STOP')
+
         # Create one progress bar for the entire operation
         with tqdm(total=total_iterations, desc="Overall Progress") as pbar:
             for channel in self.channels:
@@ -239,7 +261,7 @@ class acq:
 
 
                         # Retrieve the binary waveform data, h=signed short
-                        buff = self.yk.query_binary_values(':WAVEFORM:SEND?', datatype='h', container=list)
+                        buff = self.yk.query_binary_values('WAVEFORM:SEND?', datatype='h', container=list)
 
                         # Update progress
                         t_data.extend(buff)
@@ -489,10 +511,10 @@ if __name__ == "__main__":
     save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
 
     # Parameters (The sample rate is not being reflected in the settings, defaults to 1kHz. Why?)
-    desired_sample_rate='100000Hz' # Try 5 samples / sec
+    desired_sample_rate='50Hz' # Try 5 samples / sec
     
     # desired_acquisition_time_ms=80000 # milliseconds
-    desired_record_length = 100000000
+    desired_record_length = 1000
     noise_period_ms=41.67
     my_channels = [
         Channel(port=1, data_type='force', data=[]),
@@ -512,7 +534,7 @@ if __name__ == "__main__":
 
     # During the initialization, osc object's sampling_rate and other variables will get updated
     osc.initialize_instruments(sampling_rate=desired_sample_rate,
-                               time_div='100s',
+                               time_div='20s',
                                record_length=desired_record_length)
 
     print("Running the measurement")
