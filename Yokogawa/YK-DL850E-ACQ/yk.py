@@ -82,7 +82,7 @@ def get_devices():
         return ['No devices found!']
 
 class acq:
-    def __init__(self, chunkSize = int(1E3), channels=[1,2], mode=['X vs Y'], amp_gain=1,
+    def __init__(self, channels=None, mode=['X vs Y'], amp_gain=1,
                  volt=None,
                  acquisition_time=None, sampling_rate=None, record_length=None,
                  noise_period_ms=None):
@@ -92,20 +92,15 @@ class acq:
         Args:
             yokogawaAddress - the usb port to which the yokogawa is connected
             yk - the oscilloscope object
-            chunkSize - increment size for progress bar update
             channels - named tuple that contains the data type and data for each channel
             mode - the type of data collection to perform
             amp_gain - the amplification factor
-            prog - the progress of the data collection
+            
         """
 
         self.yokogawaAddress = 'USB0::0x0B21::0x003F::39314B373135373833::INSTR'
         self.yk = None
-        self.chunkSize = chunkSize
-        self.channels = [
-            Channel(port=1, data_type='force', data={}),
-            Channel(port=2, data_type='displacement', data={})
-        ]
+        self.channels = channels
         self.mode = mode
         self.amp_gain = amp_gain
         # Parameters that will vary by measurement
@@ -114,10 +109,7 @@ class acq:
         self.sampling_rate = sampling_rate # Desired sampling rate in Hz
         self.record_length = record_length # Desired number of points to collect 
         self.noise_period_ms = noise_period_ms # Period of noise to filter out in milliseconds
-        self.timestamp = None
-        self.prog = {'prog': 0,
-                     'iteration':1}
-
+        
         # Configure logging
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         self.logger = logging.getLogger(__name__)
@@ -176,8 +168,6 @@ class acq:
         self.logger.info(f"Finished setting the desired record length: {record_length}")
 
         self.logger.info(f"Noise period in ms: {self.noise_period_ms}")
-
-        self.logger.info(f"Chunk size: {self.chunkSize}")
 
         
         # Initialize each of the channels
@@ -473,7 +463,7 @@ if __name__ == "__main__":
     desired_sample_rate='50Hz' # Try 5 samples / sec
     
     # desired_acquisition_time_ms=80000 # milliseconds
-    desired_record_length = 10000
+    desired_record_length = 5000
     noise_period_ms=41.67
     my_channels = [
         Channel(port=1, data_type='force', data=[]),
@@ -493,7 +483,7 @@ if __name__ == "__main__":
 
     # During the initialization, osc object's sampling_rate and other variables will get updated
     osc.initialize_instruments(sampling_rate=desired_sample_rate,
-                               time_div='20s',
+                               time_div='50s',
                                record_length=desired_record_length)
 
     print("Running the measurement")
