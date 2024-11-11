@@ -21,6 +21,10 @@ import pandas as pd
 # record time = 200s
 # Timebase - 20s / div
 
+# Channel named tuple
+Channel = namedtuple('Channel', ['port', 'data_type', 'data'])
+
+
 def extract_number(string):
     pattern = r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?'
     match = re.search(pattern, string)
@@ -61,7 +65,6 @@ def get_devices():
     except:
         return ['No devices found!']
 
-
 class acq:
     def __init__(self, chunkSize = int(1E5), channels=[1,2], mode=['X vs Y'], amp_gain=1,
                  volt=None,
@@ -74,8 +77,7 @@ class acq:
             yokogawaAddress - the usb port to which the yokogawa is connected
             yk - the oscilloscope object
             chunkSize - increment size for progress bar update
-            channels - the channels to collect data from, in the form of a dictionary {channel type: channel number}
-            channel_data - data collected from each channel, in the form of a dictionary
+            channels - named tuple that contains the data type and data for each channel
             mode - the type of data collection to perform
             amp_gain - the amplification factor
             prog - the progress of the data collection
@@ -84,8 +86,10 @@ class acq:
         self.yokogawaAddress = 'USB0::0x0B21::0x003F::39314B373135373833::INSTR'
         self.yk = None
         self.chunkSize = chunkSize
-        self.channels = channels
-        self.channel_data = {channel: None for channel in channels}
+        self.channels = [
+            Channel(port=1, data_type='force', data={}),
+            Channel(port=2, data_type='displacement', data={})
+        ]
         self.mode = mode
         self.amp_gain = amp_gain
         self.prog = {
@@ -98,6 +102,7 @@ class acq:
         self.sampling_rate = sampling_rate # Desired sampling rate in Hz
         self.record_length = record_length # Desired number of points to collect 
         self.noise_period_ms = noise_period_ms # Period of noise to filter out in milliseconds
+        self.timestamp = None
 
         # Configure logging
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -159,7 +164,7 @@ class acq:
         # Initialize each of the channels
         for channel in self.channels:
             
-            self.yk.write(':WAVeform:TRACE ' + str(channel))
+            self.yk.write(':WAVeform:TRACE ' + str(channel.port))
             result = self.yk.query('WAVEFORM:RECord? MINimum')
             min_record = int(extract_number(result))
             self.yk.write(':WAVeform:RECord ' + str(min_record))
@@ -181,21 +186,30 @@ class acq:
             )
         return actual_rate
 
+    # Generate a consistent timestamp format for all saving operations
+    def _generate_timestamp(self):
+        return datetime.now().strftime('%Y%m%d_%H%M%S')
+
     # Currently, the run() function contains initialization steps and yk.close()
     def run(self):
 
         # Check that the sampling rate is what was specified, and use the sampling rate in the oscilloscope if it is different
         sampling_rate = self._verify_sampling_rate()
         
+         # Calculate total iterations for all channels
+        total_channels = len(self.channels)
+        length = int(extract_number(self.yk.query(':WAVEFORM:LENGth?')))
+        chunks_per_channel = int(np.floor(length / self.chunkSize)) + 1
+        total_iterations = total_channels * chunks_per_channel
 
+        # Create a progress bar for the entire operation
+        with tdqm(total=total_iterations, desc="Processing Channels") as pbar:
         for channel in self.channels:
 
-            self.logger.info(f"Processing channel {channel}")
+            self.logger.info(f"Processing channel {channel.port}-{channel.data_type}")
             length = int(extract_number(self.yk.query(':WAVEFORM:LENGth?')))
             
             data = {}
-
-            print("Defining n")
             n = int(np.floor(length / self.chunkSize))
             t_data = []
 
@@ -250,54 +264,79 @@ class acq:
                         data['psd_acc'] = psd_acc
                         data['psd_pos'] = psd_acc / freq ** 2
 
-                self.channel_data[channel] = data
-            self.prog['iteration'] += 1
-            print('Channel completed')
+                # Save the collected data to the oscilloscope channel attribute
+                
+                # Find the channel whose port matches the current port we are on
+                # update_channel = next((f for f in self.channels if f.port == channel.port))
+                # Using a list comprehension to replace the element
+                self.channels = [
+                    f._replace(data=data) if f.port == channel.port else f for f in self.channels
+                ]
+                # Alternatively: 
+                # Find the index of the channel to update
+                # channel_index = next(i for i, f in enumerate(self.channels) if f.port == channel.port)
+                # Update the channel at that index
+                # self.channels[channel_index] = self.channels[channel_index]._replace(data=data)
+                self.prog['iteration'] += 1
 
         self.yk.close()
+        print("The updated osc object's channel data looks like")
+        print(self.channels)
 
-    # Assumes that the oscilloscope inputs are known and fixed
     def save(self, label, save_dir):
-        df = pd.DataFrame({key: value['t_volt'] for key, value in self.channel_data.items()})
 
-        # Relabel the columns, based on the mode
-        if 'X vs Y' in self.mode:
-            # Specify the column renaming
-            new_column_names = {1: 'channel1 - load cell', 2: 'channel2 - disp. sensor'}
+        print("Beginning save")
+        df = pd.DataFrame()
+        print(self.channels)
+        
+        for channel in self.channels:
+            print(f"In for loop, on channel {channel.port}")
+            print(channel.data)
+            
+            # For each key in the data dictionary (like 't_volt')
+            for data_key, values in channel.data.items():
 
-            # Rename the columns
-            df = df.rename(columns=new_column_names)
+                if len(channel.data) == 1:
+                    column_name = f"channel{channel.port}_{channel.data_type}"
+                else:
+                    column_name = f"channel{channel.port}_{channel.data_type}_{data_key}"
+            
+                logging.info('Setting column name to: ' + column_name)
+                # Convert numpy array to pandas series
+                df[column_name] = values
+        
+        print(df)
 
-
-        # Generate a timestamp for the file name
-        timestamp = datetime.now().strftime('%Y%m%d%H%M')
-        file_name = f"{timestamp}_{label}.csv"
+        # Generate a timestamp for this set of data
+        self.timestamp = self._generate_timestamp()
+        file_name = f"{self.timestamp}_{label}.csv"
 
         os.makedirs(save_dir, exist_ok=True)
         df.to_csv(os.path.join(save_dir, file_name), index=False)
 
     def plot(self):
         figs = []
+        
         if 'time domain' in self.mode:
-            for i, (key, data) in enumerate(self.channel_data.items()):
+            for channel in self.channels:
                 # Time Domain Plot
-                t = data['t']
-                t_data = data['t_volt']
+                t = channel.data['t']
+                t_data = channel.data['t_volt']
                 fig = go.Figure(data=go.Scatter(
                     x=t,
                     y=t_data,
                     mode='lines'))
                 fig.update_layout(
-                    title_text='Time Domain Signal, Channel ' + str(key),
+                    title_text=f'Time Domain Signal, Channel {channel.port} ({channel.data_type})',
                     xaxis_title='Time (s)',
                     yaxis_title='Voltage (V)')
                 figs.append(fig)
 
         if 'frequency domain' in self.mode:
-            for i, (key, data) in enumerate(self.channel_data.items()):
+            for channel in self.channels:
                 # Frequency Domain Plot
-                f = data['f']
-                psd_data = data['psd_pos']
+                f = channel.data['f']
+                psd_data = channel.data['psd_pos']
 
                 x_lim = [0, 6E2]
                 y_lim = []
@@ -311,38 +350,32 @@ class acq:
                     y=psd_data,
                     mode='lines'))
                 fig.update_layout(
-                    title='Frequency Domain Signal, Channel ' + str(key),
+                    title=f'Frequency Domain Signal, Channel {channel.port} ({channel.data_type})',
                     xaxis_title='Frequency (Hz)',
                     yaxis_title='Position PSD (m/√Hz)',
-                    xaxis_range=x_lim,
-                    #yaxis_range=log_y_lim
-                )
+                    xaxis_range=x_lim)
                 fig.update_yaxes(type="log")
                 figs.append(fig)
 
         if 'resonance' in self.mode:
-            for i, (key, data) in enumerate(self.channel_data.items()):
+            for channel in self.channels:
                 # Time Domain Plot
-                t = data['t']
-                t_data = data['t_acc']
+                t = channel.data['t']
+                t_data = channel.data['t_acc']
                 popt, pcov = sc.optimize.curve_fit(damping_func, t, t_data)
                 [A, l, w, p] = popt
                 fn = w / (2 * math.pi)
                 zeta = l / np.sqrt(l ** 2 + w ** 2)
                 delta = 2 * 3.1416 * zeta / np.sqrt(1 - zeta ** 2)
                 t_fit = damping_func(t, A, l, w, p)
-                data_trace = go.Scatter(
-                    x=t,
-                    y=t_data,
-                    mode='lines')
-                fit_trace = go.Scatter(
-                    x=t,
-                    y=t_fit,
-                    mode='lines')
+                
+                data_trace = go.Scatter(x=t, y=t_data, mode='lines', name='Data')
+                fit_trace = go.Scatter(x=t, y=t_fit, mode='lines', name='Fit')
+                
                 fig = go.Figure(data=[data_trace, fit_trace])
-                titlestring = 'Resonance Measurement of QZS Flexure Component, Channel ' + str(key) + '<br>'
-                #titlestring += r'fit to $y = A \exp{-\lambda t} \cos{\omega t - \varphi}$' + '<br>'
-                titlestring += r"A={:.5g}, l={:.5g}, w={:.5g}, fn={:.5g} p={:.5g}, d={:.5g}".format(A, l, w, fn, p, delta)
+                titlestring = f'Resonance Measurement of QZS Flexure Component, Channel {channel.port} ({channel.data_type})<br>'
+                titlestring += f"A={A:.5g}, l={l:.5g}, w={w:.5g}, fn={fn:.5g} p={p:.5g}, d={delta:.5g}"
+                
                 fig.update_layout(
                     title_text=titlestring,
                     xaxis_title='Time (s)',
@@ -351,42 +384,32 @@ class acq:
 
         if 'X vs Y' in self.mode:
 
-            # Y is force
-            force_channel = self.channels['force']
-            print(f"force_channel: {force_channel}" )
+            """Get force channel data"""
+            force_channel = next(ch for ch in self.channels if ch.data_type == 'force')
+            force_voltage = np.array(force_channel.data['t_volt'])
 
-            # X is displacement
-            disp_channel = self.channels['displacement']
-            print(f"disp_channel: {disp_channel}" )
-
-            ###### Get the force data in Newtons and process it to get the correct values
-            #### Old formula:
-            # y = 4.108 * (np.array(self.channel_data[self.channels[1]]['t_volt']) - 4.547)
-            
-            #### Updated formulas: Assuming a linear relation between output voltage range and measurable force range
-            
-            # Manual
-            y = 4.44822162 * (0.25 * (np.array(self.channel_data[self.channels[0]]['t_volt']) - 1.25))
-
+            ###### Convert the force data from volts to Newtons
+            #### Assuming a linear relation between output voltage range and measurable force range
+            # Conversion to Newtons as given by the sensor spec sheet
+            y = 4.44822162 * (0.25 * (force_voltage - 1.25))
             # Grams to Newtons, calibration with the weights
-            # y = 9.81 * (1.2506 * np.array(self.channel_data[self.channels[1]]['t_volt']) - 0.6525)
+            # y = 9.81 * (1.2506 * force_voltage - 0.6525)
+            
 
-            self.channel_data[self.channels[0]]['force (N)'] = y
-            #self.channel_data[self.channels[1]]['distance (mm)'] = []
+            """Get displacement data (x-axis)"""
+            disp_channel = next(ch for ch in self.channels if ch.data_type == 'displacement')
+            disp_voltage = np.array(disp_channel.data['t_volt'])
 
-            ###### Get the distance data in mm and process it to get the correct values
-            #### Old formula:
-            # x = -7.766 * np.array(self.channel_data[self.channels[0]]['t_volt'])
-
-            # Using the electrical travel range omf 38.1mm, setting full compression = 0mm, no compression = -38.1mm
-            x = -38.1/self.volt[0] * np.array(self.channel_data[self.channels[1]]['t_volt'])
-            x = x - np.min(x)
-            self.channel_data[self.channels[1]]['distance (mm)'] = x
-
-            # Currently averages the data in chunks after collection
-            x_reduced = average_reduce(x, 1)
-            y_reduced = average_reduce(y, 1)
-
+            ########## Convert the displacement data from volts to mm
+            ##### Assuming a linear relation between the voltage range and mechanical travel range
+            #### Using the electrical travel distance of 38.1mm
+            x = -38.1/self.volt[0] * disp_voltage
+            x = x - np.min(x)  # Zero the minimum displacement
+            
+            # Average reduction
+            x_reduced = average_reduce(x, 10)
+            y_reduced = average_reduce(y, 10)
+            
             fig = go.Figure(data=go.Scatter(
                 x=x_reduced,
                 y=y_reduced,
@@ -399,23 +422,26 @@ class acq:
 
         return figs
 
-def save_figures(figures, output_dir='./figures'):
-    # Create the output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
-    
-    for i, fig in enumerate(figures):
-        # Generate a filename based on the figure's title or use a default name
-        title = fig.layout.title.text if fig.layout.title.text else f"figure_{i+1}"
-        # Remove any characters that are not suitable for filenames
-        filename = ''.join(c for c in title if c.isalnum() or c in (' ', '_')).rstrip()
-        filename = filename.replace(' ', '_') + '.png'
         
-        # Full path for the output file
-        filepath = os.path.join(output_dir, filename)
+
+    def save_figures(self, figures, output_dir='./figures'):
+        # Create the output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
         
-        # Save the figure as a PNG file
-        pio.write_image(fig, filepath)
-        print(f"Saved figure to {filepath}")
+        for i, fig in enumerate(figures):
+            # Generate a filename based on the figure's title or use a default name
+            title = fig.layout.title.text if fig.layout.title.text else f"figure_{i+1}"
+            # Remove any characters that are not suitable for filenames
+            filename = ''.join(c for c in title if c.isalnum() or c in (' ', '_')).rstrip()
+            filename = filename.replace(' ', '_')
+            filename = f"{self.timestamp}_{filename}.png"
+            
+            # Full path for the output file
+            filepath = os.path.join(output_dir, filename)
+            
+            # Save the figure as a PNG file
+            pio.write_image(fig, filepath)
+            print(f"Saved figure to {filepath}")
 
 ### Beginning of Main ###
 if __name__ == "__main__":
@@ -428,15 +454,16 @@ if __name__ == "__main__":
     # desired_acquisition_time_ms=80000 # milliseconds
     record_length = 10000
     noise_period_ms=41.67
-
-    force_cal_params = []
-    dis_cal_params = []
-
-    print("Test F vs. D acquisition")
+    my_channels = [
+        Channel(port=1, data_type='force', data=[]),
+        Channel(port=2, data_type='displacement', data=[])
+        ]
+    
+    print("Beginning of main")
     osc=acq(
-        channels={'force':1, 'displacement':2},
+        channels=my_channels,
         mode=['X vs Y'],
-        volt=0.2,
+        volt=0.4,
         noise_period_ms=noise_period_ms
     )
 
@@ -457,22 +484,11 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error opening running Yokogawa oscilloscope: {e}")
 
-    print(osc.channel_data)
+    try:
+        print('Saving the data')
+        osc.save('test_FvsD', save_dir)
+    except Exception as e:
+        print(f"Error saving the data: {e}")
+
     figs = osc.plot()
-    save_figures(figs)
-    osc.save('test_FvsD', save_dir)
-    
-    # dataframe = acq.save_data_to_csv(save_dir)
-
-
-    # acq.save_data_to_csv(save_dir)
-    # acq.plot_arrays(save_dir)
-
-    # acq.plot(save_dir)
-
-
-
-
-
-
-
+    osc.save_figures(figs)
