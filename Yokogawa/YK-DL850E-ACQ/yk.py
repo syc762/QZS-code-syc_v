@@ -156,7 +156,10 @@ class acq:
         self.yk.write(':ACQuire:MODE NORMAL')
 
         # Set and verify the record length
+        self.record_length = record_length
         self.yk.write(':ACQuire:RLENgth ' + str(record_length))
+        result = self.yk.query(':ACQuire:RLENgth?')
+        self.logger.info(f"Record length set to: {result}")
 
         self.logger.info(f"Noise period in ms: {self.noise_period_ms}")
 
@@ -199,8 +202,8 @@ class acq:
         
         # Calculate total iterations for all channels
         total_channels = len(self.channels)
-        length = int(extract_number(self.yk.query(':WAVEFORM:LENGth?')))
-        chunks_per_channel = int(np.floor(length / self.chunkSize)) + 1
+        length = extract_number(self.yk.query(':ACQuire:RLENGth?'))
+        chunks_per_channel = int(np.floor(length / self.chunkSize)) # No plus 1
         total_iterations = total_channels * chunks_per_channel
         
         # Create one progress bar for the entire operation
@@ -212,8 +215,8 @@ class acq:
                 self.logger.info(f"Processing channel {channel.port}-{channel.data_type} at {datetime.now().strftime('%H:%M:%S')}")
                 
                 # Get waveform length
-                length = int(extract_number(self.yk.query(':WAVEFORM:LENGth?')))
-                self.logger.info(f"Waveform length initially is: {length}")
+                # length = int(extract_number(self.yk.query(':ACQuire:RLENGth?')))
+                self.logger.info(f"Expected waveform length is: {length}")
                 n = int(np.floor(length / self.chunkSize))
                 
                 # Initialize data collection
@@ -221,18 +224,21 @@ class acq:
                 t_data = []
 
                 with tqdm(total=n+1, desc=f"Channel {channel.port}-{channel.data_type}", leave=False) as chunk_pbar:
-                    for i in range(n + 1):
+                    for i in range(n):
                         chunk_start=time.time()
 
-                        # Calculate the end of the chunk
-                        end_point = min(length, (i + 1) * self.chunkSize) - 1
+                        # Calculate the start and end of the chunk
                         start_point = i * self.chunkSize
+                        end_point = min(length, (i + 1) * self.chunkSize)-1
                     
                         # Capturing each chunk of data
                         self.yk.write(":WAVEFORM:START {};:WAVEFORM:END {}".format(start_point, end_point))
+                        self.logger.info(f"Capturing chunk from {start_point} to {end_point}")
                         #waveform_srate = self.yk.query(':WAVeform:SRATe?')
                         #sampling_rate = extract_number(waveform_srate)
 
+
+                        # Retrieve the binary waveform data, h=signed short
                         buff = self.yk.query_binary_values(':WAVEFORM:SEND?', datatype='h', container=list)
 
                         # Update progress
@@ -248,6 +254,11 @@ class acq:
                         chunk_pbar.update(1)
 
                 """Process the channel data"""
+
+                # Capture the waveform data
+                waveform_capture = self.yk.query(':WAVeform:CAPTure?')
+                self.logger.info(f"Waveform capture status: {waveform_capture}")
+
                 # Query the waveform parameters
                 waveform_offset = self.yk.query(':WAVEFORM:OFFSET?')
                 offset = extract_number(waveform_offset)
@@ -256,12 +267,12 @@ class acq:
                 w_range = extract_number(waveform_range)
 
                 waveform_length = self.yk.query(':WAVeform:LENGth?')
-                length = extract_number(waveform_length)
+                waveform_length_extracted = extract_number(waveform_length)
                 
-                if length == record_length:
-                    self.logger.info(f"Record length matches the desired value: {record_length}")
+                if length == self.record_length:
+                    self.logger.info(f"Record length matches the desired value: {self.record_length}")
                 else:
-                    self.logger.warning(f"Record length mismatch - Expected: {record_length}, Actual: {length}")
+                    self.logger.warning(f"Record length mismatch - Expected: {self.record_length}, Actual: {waveform_length_extracted}")
 
 
                 # Convert the raw waveform data
@@ -478,10 +489,10 @@ if __name__ == "__main__":
     save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
 
     # Parameters (The sample rate is not being reflected in the settings, defaults to 1kHz. Why?)
-    desired_sample_rate='10000Hz' # Try 5 samples / sec
+    desired_sample_rate='100000Hz' # Try 5 samples / sec
     
     # desired_acquisition_time_ms=80000 # milliseconds
-    record_length = 1000000
+    desired_record_length = 100000000
     noise_period_ms=41.67
     my_channels = [
         Channel(port=1, data_type='force', data=[]),
@@ -493,15 +504,16 @@ if __name__ == "__main__":
         channels=my_channels,
         mode=['X vs Y'],
         volt=0.2,
-        noise_period_ms=noise_period_ms
+        noise_period_ms=noise_period_ms,
+        record_length=desired_record_length
     )
 
     osc.open_instruments()
 
     # During the initialization, osc object's sampling_rate and other variables will get updated
     osc.initialize_instruments(sampling_rate=desired_sample_rate,
-                               time_div='20s',
-                               record_length=1000)
+                               time_div='100s',
+                               record_length=desired_record_length)
 
     print("Running the measurement")
 
@@ -509,7 +521,7 @@ if __name__ == "__main__":
     try:
         osc.run()
     except Exception as e:
-        print(f"Error opening running Yokogawa oscilloscope: {e}")
+        print(f"Error running Yokogawa oscilloscope: {e}")
 
     try:
         print('Saving the data')
