@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import scipy as sc
 from collections import namedtuple
 from tqdm import tqdm
+import time
 from datetime import datetime
 from typing import Optional
 import plotly.io as pio
@@ -92,10 +93,6 @@ class acq:
         ]
         self.mode = mode
         self.amp_gain = amp_gain
-        self.prog = {
-            'iteration': 1,
-            'prog': 0
-        }
         # Parameters that will vary by measurement
         self.volt = volt, # The total voltage applied to the displacement sensor (Needed to compute the distance traveled)
         self.acquisition_time = acquisition_time # Desired acquisition time in seconds
@@ -103,6 +100,8 @@ class acq:
         self.record_length = record_length # Desired number of points to collect 
         self.noise_period_ms = noise_period_ms # Period of noise to filter out in milliseconds
         self.timestamp = None
+        self.prog = {'prog': 0,
+                     'iteration':1}
 
         # Configure logging
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -130,15 +129,20 @@ class acq:
 
 
     def _initialize_oscilloscope(self, sampling_rate, time_div, record_length):
-
-        # Initialize an instance of the acq object
+        """
+        Initialize oscilloscope with specified record length and verify settings
+    
+        Args:
+            sampling_rate: Desired sampling rate string (e.g., '5Hz')
+            time_div: Time per division string (e.g., '20s')
+            record_length: Desired number of points to collect
+        """
         
         # Ensure a fresh restart
         self.yk.write(':STOP')
         self.yk.write(':WAVEFORM:FORMAT WORD')
         self.yk.write(':WAVEFORM:BYTEORDER LSBFIRST')
         
-        ###### General Timebase settings
         # Set the time division
         self.yk.write(':TIMebase:TDIV ' + time_div)
         logging.info(f"Finished setting the desired time division: {time_div}" )
@@ -147,14 +151,12 @@ class acq:
         self.yk.write(':TIMebase:SRATe ' + sampling_rate)
         logging.info(f"Finished setting the desired sampling rate: {sampling_rate}")
         self.sampling_rate = extract_number(sampling_rate)
-
-        # Set the record length
-        self.yk.write(':WAVeform:RECordlength ' + str(record_length))
        
-
         # Set acquisition mode
         self.yk.write(':ACQuire:MODE NORMAL')
 
+        # Set and verify the record length
+        self.yk.write(':ACQuire:RLENgth ' + str(record_length))
 
         self.logger.info(f"Noise period in ms: {self.noise_period_ms}")
 
@@ -192,106 +194,132 @@ class acq:
 
     # Currently, the run() function contains initialization steps and yk.close()
     def run(self):
-
-        # Check that the sampling rate is what was specified, and use the sampling rate in the oscilloscope if it is different
+        # Check sampling rate
         sampling_rate = self._verify_sampling_rate()
         
-         # Calculate total iterations for all channels
+        # Calculate total iterations for all channels
         total_channels = len(self.channels)
         length = int(extract_number(self.yk.query(':WAVEFORM:LENGth?')))
         chunks_per_channel = int(np.floor(length / self.chunkSize)) + 1
         total_iterations = total_channels * chunks_per_channel
+        
+        # Create one progress bar for the entire operation
+        with tqdm(total=total_iterations, desc="Overall Progress") as pbar:
+            for channel in self.channels:
+                start_time = time.time()
+                acquisition_start = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Create a progress bar for the entire operation
-        with tdqm(total=total_iterations, desc="Processing Channels") as pbar:
-        for channel in self.channels:
-
-            self.logger.info(f"Processing channel {channel.port}-{channel.data_type}")
-            length = int(extract_number(self.yk.query(':WAVEFORM:LENGth?')))
-            
-            data = {}
-            n = int(np.floor(length / self.chunkSize))
-            t_data = []
-
-
-            for i in tqdm(range(n + 1)):
+                self.logger.info(f"Processing channel {channel.port}-{channel.data_type} at {datetime.now().strftime('%H:%M:%S')}")
                 
-                m = min(length, (i + 1) * self.chunkSize) - 1
-
-                print("Set the start and end data point in the waveform")
+                # Get waveform length
+                length = int(extract_number(self.yk.query(':WAVEFORM:LENGth?')))
+                self.logger.info(f"Waveform length initially is: {length}")
+                n = int(np.floor(length / self.chunkSize))
                 
-                # Capturing each chunk of data
-                self.yk.write(":WAVEFORM:START {};:WAVEFORM:END {}".format(i * self.chunkSize, m))
-                waveform_srate = self.yk.query(':WAVeform:SRATe?')  # Get sampling rate
-                sampling_rate = extract_number(waveform_srate)
+                # Initialize data collection
+                data = {}
+                t_data = []
 
-                buff = self.yk.query_binary_values(':WAVEFORM:SEND?', datatype='h', container=list)
+                with tqdm(total=n+1, desc=f"Channel {channel.port}-{channel.data_type}", leave=False) as chunk_pbar:
+                    for i in range(n + 1):
+                        chunk_start=time.time()
 
-                t_data.extend(buff)
-                self.prog['prog'] = (i + 1) / (n + 1)
-                
-                # Query the waveform offset
+                        # Calculate the end of the chunk
+                        end_point = min(length, (i + 1) * self.chunkSize) - 1
+                        start_point = i * self.chunkSize
+                    
+                        # Capturing each chunk of data
+                        self.yk.write(":WAVEFORM:START {};:WAVEFORM:END {}".format(start_point, end_point))
+                        #waveform_srate = self.yk.query(':WAVeform:SRATe?')
+                        #sampling_rate = extract_number(waveform_srate)
+
+                        buff = self.yk.query_binary_values(':WAVEFORM:SEND?', datatype='h', container=list)
+
+                        # Update progress
+                        t_data.extend(buff)
+                        self.prog['prog']=(i+1)/(n+1)
+                    
+                        # Update the chunk progress bar
+                        chunk_time = time.time()-chunk_start
+                        chunk_pbar.set_postfix({
+                            'chunk_time': f"{chunk_time:.2f}s",
+                            'points': len(buff)
+                        })
+                        chunk_pbar.update(1)
+
+                """Process the channel data"""
+                # Query the waveform parameters
                 waveform_offset = self.yk.query(':WAVEFORM:OFFSET?')
                 offset = extract_number(waveform_offset)
 
-                # Query the waveform range
                 waveform_range = self.yk.query(':WAVeform:RANGe?')
                 w_range = extract_number(waveform_range)
 
-                print("THE waveform capture length is: " + str(self.yk.query(":WAVEFORM:LENGth?")))
-                # Convert the raw waveform range data to t_data
-                t_data = w_range * np.array(t_data, dtype=float) * 10.0 / 24000.0 + offset  # some random bullshit formula in the communication manual
+                waveform_length = self.yk.query(':WAVeform:LENGth?')
+                length = extract_number(waveform_length)
+                
+                if length == record_length:
+                    self.logger.info(f"Record length matches the desired value: {record_length}")
+                else:
+                    self.logger.warning(f"Record length mismatch - Expected: {record_length}, Actual: {length}")
 
-                #if 'time domain' in self.mode or 'X vs Y' in self.mode or 'resonance' in self.mode:
+
+                # Convert the raw waveform data
+                t_data = w_range * np.array(t_data, dtype=float) * 10.0 / 24000.0 + offset
+
+                # Process data based on mode
                 if any(mode in self.mode for mode in ['time domain', 'X vs Y', 'resonance']):
                     data['t_volt'] = t_data
-
-                    # if 'time domain' in self.mode or 'resonance' in self.mode:
                     if any(mode in self.mode for mode in ['time domain', 'resonance']):
                         data['t'] = np.arange(len(t_data)) / sampling_rate
 
-                #if 'frequency domain' in self.mode or 'resonance' in self.mode:
                 if any(mode in self.mode for mode in ['frequency domain', 'resonance']):    
-                    
                     data['t_acc'] = (9.81 / 10) * t_data / self.amp_gain
                     if 'frequency domain' in self.mode:
                         freq, psd_acc = sc.signal.periodogram(data['t_acc'], fs=sampling_rate)
-                            # sc.signal.welch(data['t_acc'],fs=sampling_rate,nperseg=sampling_rate,window='blackman',noverlap=0)
                         freq = freq[1:-1]
                         psd_acc = psd_acc[1:-1]
-
                         data['f'] = freq
                         data['psd_acc'] = psd_acc
                         data['psd_pos'] = psd_acc / freq ** 2
 
-                # Save the collected data to the oscilloscope channel attribute
-                
-                # Find the channel whose port matches the current port we are on
-                # update_channel = next((f for f in self.channels if f.port == channel.port))
-                # Using a list comprehension to replace the element
+                # Update the overall progress bar
+                channel_time = time.time()-start_time
+                # pbar.set_postfix({'channel_time': f"{channel.port}-{channel.data_type} took {channel_time:.2f}s"})
+                pbar.set_postfix({
+                    'channel_time': f"{channel_time:.2f}s",
+                    'channel': f"{channel.port}-{channel.data_type}"
+                })
+                pbar.update(1)
+
+                print()
+                self.logger.info(f"Channel {channel.port} completed in {channel_time:.2f}s")
+
+
+                # Update channel data after processing all chunks
                 self.channels = [
-                    f._replace(data=data) if f.port == channel.port else f for f in self.channels
+                    f._replace(data=data) if f.port == channel.port else f 
+                    for f in self.channels
                 ]
-                # Alternatively: 
-                # Find the index of the channel to update
-                # channel_index = next(i for i, f in enumerate(self.channels) if f.port == channel.port)
-                # Update the channel at that index
-                # self.channels[channel_index] = self.channels[channel_index]._replace(data=data)
-                self.prog['iteration'] += 1
 
         self.yk.close()
-        print("The updated osc object's channel data looks like")
-        print(self.channels)
+        # print("The updated osc object's channel data looks like")
+        # print(self.channels)
+        # Calculate and log timing information
+        total_time = time.time() - start_time
+        self.logger.info("\nAcquisition Summary:")
+        self.logger.info(f"Start time: {acquisition_start}")
+        self.logger.info(f"End time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.logger.info(f"Total acquisition time: {total_time:.2f} seconds")
+        self.logger.info(f"Average time per channel: {total_time/total_channels:.2f} seconds")
+        
 
     def save(self, label, save_dir):
 
         print("Beginning save")
         df = pd.DataFrame()
-        print(self.channels)
         
         for channel in self.channels:
-            print(f"In for loop, on channel {channel.port}")
-            print(channel.data)
             
             # For each key in the data dictionary (like 't_volt')
             for data_key, values in channel.data.items():
@@ -450,9 +478,10 @@ if __name__ == "__main__":
     save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
 
     # Parameters (The sample rate is not being reflected in the settings, defaults to 1kHz. Why?)
-    desired_sample_rate='5Hz' # Try 5 samples / sec
+    desired_sample_rate='10000Hz' # Try 5 samples / sec
+    
     # desired_acquisition_time_ms=80000 # milliseconds
-    record_length = 10000
+    record_length = 1000000
     noise_period_ms=41.67
     my_channels = [
         Channel(port=1, data_type='force', data=[]),
@@ -463,7 +492,7 @@ if __name__ == "__main__":
     osc=acq(
         channels=my_channels,
         mode=['X vs Y'],
-        volt=0.4,
+        volt=0.2,
         noise_period_ms=noise_period_ms
     )
 
@@ -473,8 +502,6 @@ if __name__ == "__main__":
     osc.initialize_instruments(sampling_rate=desired_sample_rate,
                                time_div='20s',
                                record_length=1000)
-    print("After initialization, the acquisition time is ")
-    print(osc.acquisition_time)
 
     print("Running the measurement")
 
