@@ -101,10 +101,11 @@ class acq:
         self.yokogawaAddress = 'USB0::0x0B21::0x003F::39314B373135373833::INSTR'
         self.yk = None
         self.channels = channels
+       
         self.mode = mode
         self.amp_gain = amp_gain
         # Parameters that will vary by measurement
-        self.volt = volt, # The total voltage applied to the displacement sensor (Needed to compute the distance traveled)
+        self.volt = volt # The total voltage applied to the displacement sensor (Needed to compute the distance traveled)
         self.acquisition_time = acquisition_time # Desired acquisition time in seconds
         self.sampling_rate = sampling_rate # Desired sampling rate in Hz
         self.record_length = record_length # Desired number of points to collect 
@@ -174,12 +175,19 @@ class acq:
         # Initialize each of the channels
         for channel in self.channels:
             
-            self.yk.write(':WAVeform:TRACE ' + str(channel.port))
             result = self.yk.query(':WAVEFORM:RECord? MINimum')
             min_record = int(extract_number(result))
             self.yk.write(':WAVeform:RECord ' + str(min_record))
-        
-    
+            self.logger.info(f"Minimum record point for channel {channel.port} is: {min_record}")
+
+            # Set the channel probe
+            self.yk.write(f':CHANnel{channel.port}:PROBe 1')
+            self.logger.info(f"Set the probe setting for channel {channel.port} to 1")
+            after_setting = self.yk.query(f':CHANnel{channel.port}:PROBe?')
+            self.logger.info(f"The probe setting for channel {channel.port} is now: {after_setting}")
+
+
+
     def initialize_instruments(self, sampling_rate, time_div, record_length):
         self._initialize_oscilloscope(sampling_rate, time_div, record_length)
 
@@ -196,8 +204,8 @@ class acq:
             )
         return actual_rate
     
+
     def _verify_record_length(self):
-         
          
         actual_length = extract_number(self.yk.query(':WAVeform:LENGth?'))
             
@@ -216,9 +224,16 @@ class acq:
     def _verify_format_settings(self):
         format_type = self.yk.query(':WAVeform:FORMat?')
         byte_order = self.yk.query(':WAVeform:BYTeorder?')
+        sign = self.yk.query(':WAVeform:SIGN?')
 
         self.logger.info(f"Waveform format: {format_type}")
         self.logger.info(f"Byte order: {byte_order}")
+        self.logger.info(f"Sign setting: {sign}")
+
+        # If sign = 1, then datatype for query_binary_values should be 'h'
+
+    # def _save_raw_data(self, data, save_dir):
+
 
 
     # Currently, the run() function contains initialization steps and yk.close()
@@ -240,9 +255,13 @@ class acq:
 
         # Create one progress bar for the entire operation
         
+        # @ For debugging purposes only, a list of the raw data before converting it for the correct data type
+        data_raw = {}
+
         for channel in self.channels:
             
             self.logger.info(f"Gathering data from channel {channel.port}-{channel.data_type}")
+            self.yk.write(':WAVeform:TRACE ' + str(channel.port))
             
             # Get waveform length
             # length = int(extract_number(self.yk.query(':ACQuire:RLENGth?')))
@@ -252,21 +271,25 @@ class acq:
             
             # Initialize the data storage dictionary and list
             data = {}
-            t_data = []
 
-            # Transfer the data
+            # Set the waveform start and end points
             start_point = 0
             end_point = acquired_waveform_length - 1
             self.yk.write(":WAVEFORM:START {};:WAVEFORM:END {}".format(start_point, end_point))
             self.logger.info(f"Capturing waveform from {start_point} to {end_point}")
+        
                     
             # Retrieve the binary waveform data, h=signed short
-            #print("The original waveform:send query returns:")
-            #print(self.yk.write(':WAVEFORM:SEND?'))
-            t_data = self.yk.query_binary_values('WAVEFORM:SEND?', datatype='h', container=list)
+            t_data_raw = self.yk.query_binary_values('WAVEFORM:SEND?', datatype='h', container=list)
+            self.logger.info(f"t_data_raw : {t_data_raw}")
+            #self.logger.info(f"Raw data first 5 values for channel {channel.port}: {t_data_raw[:5]}")
+            #self.logger.info(f"Raw data last 5 values for channel {channel.port}: {t_data_raw[-5:]}")
             self.logger.info(f"Waveform data sent to the computer")
-            #t_data.extend(buff)
-                    
+            
+            # Save the raw data 
+            data_raw[f"{channel.port}_{channel.data_type}"] = t_data_raw
+              
+        
             """Process the channel data"""
 
             # Query the waveform parameters @
@@ -280,7 +303,9 @@ class acq:
 
             
             # Convert the raw waveform data
-            t_data = w_range * np.array(t_data, dtype=float) * 10.0 / 24000.0 + offset
+            t_data = (w_range * np.array(t_data_raw, dtype=float) * 10.0) / 24000.0 + offset
+            self.logger.info(f"Converted data first 5 values for channel {channel.port}: {t_data[:5]}")
+   
 
             # Process data based on mode
             if any(mode in self.mode for mode in ['time domain', 'X vs Y', 'resonance']):
@@ -303,12 +328,28 @@ class acq:
 
 
             # Update channel data after processing all chunks
+            print("We are currently on channel: ", channel.port)
+            self.logger.info(self.channels)
+
             self.channels = [
                 f._replace(data=data) if f.port == channel.port else f 
                 for f in self.channels
             ]
 
+            print("After updating the channel data")
+            self.logger.info(self.channels)
+            
+
         self.yk.close()
+
+        self.timestamp = self._generate_timestamp()
+        raw_df = pd.DataFrame(data_raw)
+        raw_data_dir = "./raw_data"
+        os.makedirs(raw_data_dir, exist_ok=True)
+        raw_df.to_csv(os.path.join(raw_data_dir, f"{self.timestamp}_raw_data.csv"), index=False)
+    
+        # Print first few rows to verify
+        print(raw_df.head())
 
     def save(self, label, save_dir):
 
@@ -427,7 +468,7 @@ class acq:
             ########## Convert the displacement data from volts to mm
             ##### Assuming a linear relation between the voltage range and mechanical travel range
             #### Using the electrical travel distance of 38.1mm
-            x = -38.1/self.volt[0] * disp_voltage
+            x = -38.1/self.volt * disp_voltage
             x = x - np.min(x)  # Zero the minimum displacement
             
             # Average reduction
