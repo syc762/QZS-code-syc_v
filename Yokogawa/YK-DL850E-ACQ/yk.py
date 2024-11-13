@@ -95,7 +95,7 @@ class acq:
             channels - named tuple that contains the data type and data for each channel
             mode - the type of data collection to perform
             amp_gain - the amplification factor
-            
+            prog - the progress of the data collection
         """
 
         self.yokogawaAddress = 'USB0::0x0B21::0x003F::39314B373135373833::INSTR'
@@ -109,7 +109,8 @@ class acq:
         self.sampling_rate = sampling_rate # Desired sampling rate in Hz
         self.record_length = record_length # Desired number of points to collect 
         self.noise_period_ms = noise_period_ms # Period of noise to filter out in milliseconds
-        
+        self.timestamp = None
+
         # Configure logging
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         self.logger = logging.getLogger(__name__)
@@ -211,11 +212,20 @@ class acq:
     # Generate a consistent timestamp format for all saving operations
     def _generate_timestamp(self):
         return datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    def _verify_format_settings(self):
+        format_type = self.yk.query(':WAVeform:FORMat?')
+        byte_order = self.yk.query(':WAVeform:BYTeorder?')
+
+        self.logger.info(f"Waveform format: {format_type}")
+        self.logger.info(f"Byte order: {byte_order}")
+
 
     # Currently, the run() function contains initialization steps and yk.close()
     def run(self):
         # Check sampling rate
         sampling_rate = self._verify_sampling_rate()
+        self._verify_format_settings()
         
         # Calculate total iterations for all channels
         
@@ -251,17 +261,21 @@ class acq:
             self.logger.info(f"Capturing waveform from {start_point} to {end_point}")
                     
             # Retrieve the binary waveform data, h=signed short
+            #print("The original waveform:send query returns:")
+            #print(self.yk.write(':WAVEFORM:SEND?'))
             t_data = self.yk.query_binary_values('WAVEFORM:SEND?', datatype='h', container=list)
             self.logger.info(f"Waveform data sent to the computer")
             #t_data.extend(buff)
                     
             """Process the channel data"""
 
-            # Query the waveform parameters
+            # Query the waveform parameters @
             waveform_offset = self.yk.query(':WAVEFORM:OFFSET?')
+            self.logger.info(f"Waveform offset: {waveform_offset}")
             offset = extract_number(waveform_offset)
 
             waveform_range = self.yk.query(':WAVeform:RANGe?')
+            self.logger.info(f"Waveform range: {waveform_range}")
             w_range = extract_number(waveform_range)
 
             
@@ -460,7 +474,7 @@ if __name__ == "__main__":
     save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
 
     # Parameters (The sample rate is not being reflected in the settings, defaults to 1kHz. Why?)
-    desired_sample_rate='50Hz' # Try 5 samples / sec
+    desired_sample_rate='500Hz' # Try 5 samples / sec
     
     # desired_acquisition_time_ms=80000 # milliseconds
     desired_record_length = 5000
@@ -482,8 +496,10 @@ if __name__ == "__main__":
     osc.open_instruments()
 
     # During the initialization, osc object's sampling_rate and other variables will get updated
+
+    print("Initializing the instruments")
     osc.initialize_instruments(sampling_rate=desired_sample_rate,
-                               time_div='50s',
+                               time_div='500s',
                                record_length=desired_record_length)
 
     print("Running the measurement")
