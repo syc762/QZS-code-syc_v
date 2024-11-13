@@ -281,9 +281,8 @@ class acq:
                     
             # Retrieve the binary waveform data, h=signed short
             t_data_raw = self.yk.query_binary_values('WAVEFORM:SEND?', datatype='h', container=list)
-            self.logger.info(f"t_data_raw : {t_data_raw}")
-            #self.logger.info(f"Raw data first 5 values for channel {channel.port}: {t_data_raw[:5]}")
-            #self.logger.info(f"Raw data last 5 values for channel {channel.port}: {t_data_raw[-5:]}")
+            self.logger.info(f"Raw data first 5 values for channel {channel.port}: {t_data_raw[:5]}")
+            self.logger.info(f"Raw data last 5 values for channel {channel.port}: {t_data_raw[-5:]}")
             self.logger.info(f"Waveform data sent to the computer")
             
             # Save the raw data 
@@ -328,17 +327,10 @@ class acq:
 
 
             # Update channel data after processing all chunks
-            print("We are currently on channel: ", channel.port)
-            self.logger.info(self.channels)
-
             self.channels = [
                 f._replace(data=data) if f.port == channel.port else f 
                 for f in self.channels
             ]
-
-            print("After updating the channel data")
-            self.logger.info(self.channels)
-            
 
         self.yk.close()
 
