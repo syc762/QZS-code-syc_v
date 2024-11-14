@@ -149,6 +149,8 @@ class acq:
         
         # Ensure a fresh restart
         self.yk.write(':STOP')
+        cal_mode = self.yk.write(':CALibrate:MODE?')
+        self.logger.info(f"Current calibration mode; {cal_mode}")
         self.yk.write(':WAVEFORM:FORMAT WORD')
         self.yk.write(':WAVEFORM:BYTEORDER LSBFIRST')
         
@@ -232,10 +234,7 @@ class acq:
 
         # If sign = 1, then datatype for query_binary_values should be 'h'
 
-    # def _save_raw_data(self, data, save_dir):
-
-
-
+    
     # Currently, the run() function contains initialization steps and yk.close()
     def run(self):
         # Check sampling rate
@@ -248,9 +247,11 @@ class acq:
         acquisition_time = self.record_length/sampling_rate
         self.logger.info(f"Oscilloscope will be acquiring data for: {acquisition_time:.2f} seconds")
         self.yk.write(':START')
+        self.yk.write(':BEEP')
         start_time = time.time()
         time.sleep(acquisition_time)
         self.yk.write(':STOP')
+        self.yk.write(':BEEP')
         self.logger.info(f"Oscilloscope acquired data for approximately {time.time()-start_time:.2f} seconds")
 
         # Create one progress bar for the entire operation
@@ -507,10 +508,10 @@ if __name__ == "__main__":
     save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
 
     # Parameters (The sample rate is not being reflected in the settings, defaults to 1kHz. Why?)
-    desired_sample_rate='500Hz' # Try 5 samples / sec
+    desired_sample_rate='100Hz' # Try 5 samples / sec
     
     # desired_acquisition_time_ms=80000 # milliseconds
-    desired_record_length = 5000
+    desired_record_length = 10000
     noise_period_ms=41.67
     my_channels = [
         Channel(port=1, data_type='force', data=[]),
@@ -532,7 +533,7 @@ if __name__ == "__main__":
 
     print("Initializing the instruments")
     osc.initialize_instruments(sampling_rate=desired_sample_rate,
-                               time_div='500s',
+                               time_div='100s',
                                record_length=desired_record_length)
 
     print("Running the measurement")
