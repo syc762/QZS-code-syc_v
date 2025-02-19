@@ -62,13 +62,12 @@ def convert_to_seconds(time_string):
 
 
 # Saves data to a .csv file
-def save_data_to_csv(data, label, save_dir):                                                                                           
+def save_data_to_csv(data, label, save_dir, timestamp):                                                                                           
     # Create a temporary directory to save the file
     # temp_dir = os.path.join(os.getcwd(), 'temp')
     os.makedirs(save_dir, exist_ok=True)
 
     # Generate a timestamp for the file name
-    timestamp = datetime.now().strftime('%Y%m%d%H%M')
     file_name = f"{timestamp}_transfer_data_{label}.csv"
 
     # Create a dictionary to hold the data arrays
@@ -85,7 +84,7 @@ def save_data_to_csv(data, label, save_dir):
     # Create a DataFrame using the data dictionary
     df = pd.DataFrame(data_dict)
     # df["normalized"] = df.iloc[:,[2]]/df.iloc[:,[1]] # Do not use iloc
-    df["normalized"] = df['channel2']/df['channel1']
+    df["normalized"] = df['channel1']/df['channel2']
     
     # Save the DataFrame to a CSV file in the temporary directory
 
@@ -216,7 +215,7 @@ def plot_arrays(time, timeData, freq, psdData, plotType):
 class tf:
     def __init__(self):
         ##### *!* Channels
-        self.channel = [1,3] ### original: str(1) ### 
+        self.channel = [1,2] ### original: str(1) ###  [1,3]
         # Note: Since January 2024, channel 2 & 3 [2,3] used for transfer function
         # Channel 1,2,3 used for 'X vs Y' or Force vs. Displacement curve
         self.yokogawaAddress = 'USB0::0x0B21::0x003F::39314B373135373833::INSTR'
@@ -423,7 +422,7 @@ class tf:
         self.yk.write(':STOP')
 
 
-def plot_tf_from_df(df, filename, save_dir): # Need to change which column it's referring to based on the old excel plots
+def plot_tf_from_df(df, filename, save_dir, timestamp): # Need to change which column it's referring to based on the old excel plots
     
     x = df.iloc[:,0].to_numpy()
     normalized = df.iloc[:,3].to_numpy()
@@ -455,7 +454,7 @@ def plot_tf_from_df(df, filename, save_dir): # Need to change which column it's 
     plt.title(wrapped_title, fontsize=11, wrap=True) # Attenuation
         
     try:
-        plt.savefig(os.path.join(save_dir, filename), transparent=True, bbox_inches='tight')
+        plt.savefig(os.path.join(save_dir, timestamp + "_" + filename +".png"), transparent=True, bbox_inches='tight')
     except Exception as e:
         print(e)
     plt.close()
@@ -463,14 +462,12 @@ def plot_tf_from_df(df, filename, save_dir): # Need to change which column it's 
 
 ### Beginning of Main ###
 
-# Sweeps frequences in the range 0, 200 with 20 steps in between
-numPoints = 400
-volt = ['4.0'] # Must be lower than 600mV if using the amplifier!!! Units in V, so 0.6V
+# Sweeps frequencies in the range 0, 200 with 20 steps in between
+numPoints = 100
+volt = ['2.0'] # Must be lower than 600mV if using the amplifier!!! Units in V, so 0.6V
 # Run label
-springType = "noAirlegs_noDampers_brokenFlexure_100x_ch1PSU2DOWN_ch2PSU1UP"
-
-
-
+springType = "flexureV2.1_deformed_1.5rot"
+# "noAirlegs_flexureNorm_copperPlate_sixPE016springs_2rot-2rot_7136_100x"
 
 
 
@@ -484,21 +481,21 @@ if __name__ == "__main__":
     
     for v in volt:
 
+        # Wait for 60s before running each iteration
+        time.sleep(0.1)
+        
         label = springType + "_tf_" + str(numPoints) + "points_" + v +"V"
 
         datestamp = datetime.now().strftime('%Y%m%d')
         save_folder = f"{datestamp}_{springType}"
 
-        save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi"), save_folder)
+        save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
 
         frequency = np.logspace(0, 3, num=numPoints) 
         # Will take different frequency values 
         iterations = [1 if freq > 4 else 1 for freq in frequency]
         time_divisions = ['2s' if freq < 2 else '500ms' if freq < 10 else '200ms' for freq in frequency]
 
-
-
-        
         tf.open_instruments()
         tf.initialize_instruments(voltage=v)
         all_transfer_data = tf.measure(frequency, iterations, time_divisions, bin_size=1)
@@ -511,17 +508,11 @@ if __name__ == "__main__":
 
         ### Saves the data to a csv file
 
-        df = save_data_to_csv([frequency, means1, means2], label, save_dir)
-        # save_data_to_csv([frequency, means1, stds1], "test_10points_1channels")
+        timestamp = datetime.now().strftime('%Y%m%d%H%M')
+        df = save_data_to_csv([frequency, means1, means2], label, save_dir, timestamp)
 
         ### Directly use the data to obtain the transfer function
-        plot_tf_from_df(df, label, save_dir)
-
-        # Convert the acceleration data to position data
-
+        plot_tf_from_df(df, label, save_dir, timestamp)
 
         # Using the built-in method
         # plot_tf(df, label)
-
-
-        # First iteration had a board marker dropping in the trashcan sound

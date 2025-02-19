@@ -17,4 +17,5 @@ def test_plot_multiple_graphs_missing_keys():
         plot_multiple_graphs(graphs)
 
 if __name__ == "__main__":
+    print("Test main of test_plotter")
     pytest.main()

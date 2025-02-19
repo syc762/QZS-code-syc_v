@@ -149,35 +149,40 @@ class acq:
         """
         
         # Remote control
-        remote_status = self.yk.write(':COMMunicate:REMote?')
+        remote_status = self.yk.write(':COMMunicate:REMOTE?')
         self.logger.info(f"Remote status: {remote_status}")
+        time.sleep(1)
+        self.yk.write(':STOP')
+        self.yk.write(':CALIBRATE:MODE OFF')
         self.yk.write(':COMMunicate:REMote ON')
         self.logger.info(f"Remote control enabled")
 
-        # Ensure a fresh restart
+        # Ensure a fresh restart, and set acquisition mode to normal and waveform format to WORD
         self.yk.write(':STOP')
         cal_mode = self.yk.write(':CALibrate:MODE?')
-        self.logger.info(f"Current calibration mode; {cal_mode}")
+        self.logger.info(f"Current calibration mode: {cal_mode}")
+        self.yk.write(':ACQuire:MODE NORMal')
         self.yk.write(':WAVEFORM:FORMAT WORD')
         self.yk.write(':WAVEFORM:BYTEORDER LSBFIRST')
         
+
         # Set the time division
         self.yk.write(':TIMebase:TDIV ' + time_div)
+        time.sleep(0.5)
         logging.info(f"Finished setting the desired time division: {time_div}" )
-        
-        # Set the sampling rate
-        self.yk.write(':TIMebase:SRATe ' + sampling_rate)
-        logging.info(f"Finished setting the desired sampling rate: {sampling_rate}")
-        self.sampling_rate = extract_number(sampling_rate)
-       
-        # Set acquisition mode
-        self.yk.write(':ACQuire:MODE NORMAL')
 
         # Set and verify the record length
         self.record_length = record_length
         self.yk.write(':ACQuire:RLENgth ' + str(record_length))
+        time.sleep(0.5)
         self.logger.info(f"Finished setting the desired record length: {record_length}")
-
+        
+        # Set the sampling rate
+        self.yk.write(':TIMebase:SRATE ' + sampling_rate)
+        time.sleep(0.5)
+        logging.info(f"Finished setting the desired sampling rate: {sampling_rate}")
+        self.sampling_rate = extract_number(sampling_rate)
+       
         
         # Initialize each of the channels
         for channel in self.channels:
@@ -208,9 +213,11 @@ class acq:
 
     # Verify that the sampling rate matches the expected value.
     def _verify_sampling_rate(self):
-        
+
+        time.sleep(1)  # Allow update before querying
         actual_rate = extract_number(self.yk.query(':TIMebase:SRATe?'))
-        
+        self.logger.info(f"Verified Sampling Rate: {actual_rate} Hz")
+
         if self.sampling_rate and actual_rate != self.sampling_rate:
             self.logger.warning(
                 f"Sampling rate mismatch - Expected: {self.sampling_rate} Hz, "
@@ -218,16 +225,17 @@ class acq:
             )
         return actual_rate
     
-
+    # Verify record length
     def _verify_record_length(self):
          
-        actual_length = extract_number(self.yk.query(':WAVeform:LENGth?'))
+        time.sleep(1)  # Allow update before querying
+        actual_length = extract_number(self.yk.query(':ACQuire:RLENgth?'))
+        self.logger.info(f"Verified Record Length: {actual_length} points")
             
         if self.record_length and actual_length != self.record_length:
                 self.logger.warning(
                     f"Record length mismatch - Expected: {self.record_length} points, "
                     f"Actual: {actual_length} points")
-        
         return actual_length
 
 
@@ -251,8 +259,9 @@ class acq:
     def run(self):
         # Check sampling rate
         sampling_rate = self._verify_sampling_rate()
+        self.record_length = self._verify_record_length()
         self._verify_format_settings()
-        
+
         # Calculate total iterations for all channels
         
         # Waveform capture sequence
@@ -279,7 +288,7 @@ class acq:
             # Get waveform length
             # length = int(extract_number(self.yk.query(':ACQuire:RLENGth?')))
             self.logger.info(f"Expected waveform length is: {self.record_length}")
-            acquired_waveform_length = extract_number(self.yk.query(':WAVeform:LENGth?'))
+            acquired_waveform_length = extract_number(self.yk.query(':ACQuire:RLENgth?'))
             self.logger.info(f"The acquired waveform length is: {acquired_waveform_length}")
             
             # Initialize the data storage dictionary and list
@@ -385,7 +394,7 @@ class acq:
         os.makedirs(save_dir, exist_ok=True)
         df.to_csv(os.path.join(save_dir, file_name), index=False)
 
-    def plot(self):
+    def plot(self, avg_factor=50):
         figs = []
         
         if 'time domain' in self.mode:
@@ -478,8 +487,8 @@ class acq:
             x = x - np.min(x)  # Zero the minimum displacement
             
             # Average reduction
-            x_reduced = average_reduce(x, 50)
-            y_reduced = average_reduce(y, 50)
+            x_reduced = average_reduce(x, avg_factor)
+            y_reduced = average_reduce(y, avg_factor)
             
             fig = go.Figure(data=go.Scatter(
                 x=x_reduced,
@@ -517,15 +526,16 @@ class acq:
 ### Beginning of Main ###
 if __name__ == "__main__":
 
-    flexure_type = "flexure1_7136_2minus2rot_50pts_diffStartingCompression"
-    save_folder=datetime.now().strftime('%Y%m%d')+str("_flexure1_7136")
+    
+    flexure_type = "flexureV2.1new_0rot_50pts"
+    save_folder=datetime.now().strftime('%Y%m%d')+str("_flexureV2.1")
     save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
 
     # Parameters (The sample rate is not being reflected in the settings, defaults to 1kHz. Why?)
     desired_sample_rate='100Hz' # Try 5 samples / sec
     
     # desired_acquisition_time_ms=80000 # milliseconds
-    desired_record_length = 30000
+    desired_record_length = 10000
     noise_period_ms=41.67
     my_channels = [
         Channel(port=1, data_type='force', data=[]),
@@ -543,15 +553,19 @@ if __name__ == "__main__":
         sampling_rate=100
     )
 
+    print("Open instruments")
     osc.open_instruments()
 
     # During the initialization, osc object's sampling_rate and other variables will get updated
 
     print("Initializing the instruments")
-    osc.initialize_instruments(sampling_rate=desired_sample_rate,
+    try:
+        osc.initialize_instruments(sampling_rate=desired_sample_rate,
                                time_div='100s',
                                record_length=desired_record_length)
-
+    except Exception as e:
+        print(f"Error initializing Yokogawa oscilloscope: {e}")
+        
     print("Running the measurement")
 
 
@@ -566,7 +580,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error saving the data: {e}")
 
-    figs = osc.plot()
+    figs = osc.plot(avg_factor=50)
     osc.save_figures(figs, save_dir)
-
-    
