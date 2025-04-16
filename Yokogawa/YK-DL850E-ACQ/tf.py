@@ -1,3 +1,6 @@
+# Places marked #HERE# are the ones that need to be changed
+# -*- coding: utf-8 -*-
+
 import pyvisa
 import re
 import numpy as np
@@ -62,13 +65,13 @@ def convert_to_seconds(time_string):
 
 
 # Saves data to a .csv file
-def save_data_to_csv(data, label, save_dir, timestamp):                                                                                           
+def save_data_to_csv(data, label, save_dir, timestamp, data_type):                                                                                           
     # Create a temporary directory to save the file
     # temp_dir = os.path.join(os.getcwd(), 'temp')
     os.makedirs(save_dir, exist_ok=True)
 
     # Generate a timestamp for the file name
-    file_name = f"{timestamp}_transfer_data_{label}.csv"
+    file_name = f"{timestamp}_transfer_data_{label}_{data_type}.csv"
 
     # Create a dictionary to hold the data arrays
     data_dict = {}
@@ -83,8 +86,9 @@ def save_data_to_csv(data, label, save_dir, timestamp):
 
     # Create a DataFrame using the data dictionary
     df = pd.DataFrame(data_dict)
-    # df["normalized"] = df.iloc[:,[2]]/df.iloc[:,[1]] # Do not use iloc
-    df["normalized"] = df['channel1']/df['channel2']
+    
+    # Check whether channel1 is input or output
+    #df["normalized"] = df['channel1']/df['channel2']
     
     # Save the DataFrame to a CSV file in the temporary directory
 
@@ -215,7 +219,7 @@ def plot_arrays(time, timeData, freq, psdData, plotType):
 class tf:
     def __init__(self):
         ##### *!* Channels
-        self.channel = [1,2] ### original: str(1) ###  [1,3]
+        self.channel = [1] ### original: str(1) ###  [1,3]
         # Note: Since January 2024, channel 2 & 3 [2,3] used for transfer function
         # Channel 1,2,3 used for 'X vs Y' or Force vs. Displacement curve
         self.yokogawaAddress = 'USB0::0x0B21::0x003F::39314B373135373833::INSTR'
@@ -285,9 +289,11 @@ class tf:
             # Download data from scope, convert it to an acceleration signal
             result = self.yk.query(':WAVeform:SRATe?')  # Get sampling rate
             sampling_rate = extract_number(result)
+            print("Sampling rate: " + str(sampling_rate))
 
             result = self.yk.query('WAVEFORM:LENGth?')  # Get waveform length
             waveform_length = int(extract_number(result))
+            print("Waveform length 1: " + str(waveform_length))
 
             n = int(np.floor(waveform_length / self.chunkSize))
 
@@ -306,6 +312,9 @@ class tf:
             result = self.yk.query(':WAVeform:RANGe?')
             waveform_range = extract_number(result)
 
+             # Check that the waveform range is not so small / the bit-data values are not around 0
+            print(f"Waveform Range: {waveform_range}, Offset: {waveform_offset}, Bit sample (first 10): {bit_data[:10]}")
+
             voltage_data = waveform_range * np.array(
                 bit_data) * 10 / 24000 + waveform_offset  # formula from the communication manual
 
@@ -313,6 +322,8 @@ class tf:
             time_data = np.array(range(len(acceleration_data))) / sampling_rate
 
             
+            print(f"acceleration_data: {acceleration_data[:10]}")
+
             # Calculate the position power spectral density using welch or periodogram:
             if type == 'welch':
 
@@ -331,7 +342,8 @@ class tf:
             psd_data = psd_pos
             
             ### Plot the fourier spectrum for each channel ###
-
+            print(f"frequency_of_interest = {frequency_of_interest}")
+            print(f"freq range = {freq[0]} to {freq[-1]}")
 
             # Find the max value within bin range_width, centered on frequency_of_interest
             indices = np.where((freq >= frequency_of_interest - bin_size / 2) & (freq <= frequency_of_interest + bin_size / 2))
@@ -360,6 +372,8 @@ class tf:
         
         # We change the TDIV to 1s to force a refresh and ensure we are getting the most current data
         self.yk.write(':TIMebase:TDIV ' + '1s')
+
+        # Set the timebase sampling rate and time division
         self.yk.write(':TIMebase:SRATE ' + self.__sample_rate)
         self.yk.write(':TIMebase:TDIV ' + time_div)
 
@@ -406,7 +420,7 @@ class tf:
 
             mean = self.__measurement_cycle(freq, it, t, bin_size=bin_size)
             results1.append((mean[0]))
-            results2.append((mean[1]))
+            # results2.append((mean[1])) # HERE
             # acc1.append(acc[0])
             # acc2.append(acc[1])
             # acc_norm.append(acc[1]/acc[0])
@@ -414,7 +428,7 @@ class tf:
             # pos = acc[1:-1]/freq**2
             # pos_norm.append(pos)
 
-        return results1, results2 #, acc1, acc2, acc_norm, pos_norm
+        return results1 #, results2 #, acc1, acc2, acc_norm, pos_norm  #HERE
 
 
     def close_instruments(self):
@@ -422,11 +436,13 @@ class tf:
         self.yk.write(':STOP')
 
 
-def plot_tf_from_df(df, filename, save_dir, timestamp): # Need to change which column it's referring to based on the old excel plots
+def plot_tf_from_df(df, filename, save_dir, timestamp, label): # Need to change which column it's referring to based on the old excel plots
     
     x = df.iloc[:,0].to_numpy()
-    normalized = df.iloc[:,3].to_numpy()
+    # normalized = df.iloc[:,3].to_numpy() # HERE
 
+    # Previous logic to plot the data
+    """
     if 'channel1' in df.columns:
         V_out = df.iloc[:,1].to_numpy() 
         V_in = df.iloc[:,2].to_numpy()
@@ -436,17 +452,20 @@ def plot_tf_from_df(df, filename, save_dir, timestamp): # Need to change which c
     else:
         print(f"Error reading in columns, check the column names")
         return 1
+    """
+
+    V_signal = df.iloc[:,1].to_numpy()
     
     # Labels used in the past: label="$V_{in}$", "$V_{out}$"
-    plt.plot(x, normalized, label ="$|V_{out}/V_{in}|$", c="darkorange", marker='.', linestyle='solid')
-    plt.plot(x, V_in, label="$V_{in}$", c="cornflowerblue", marker='.', linestyle='dashed')
-    plt.plot(x, V_out, label="$V_{out}$", c="mediumblue", marker='.', linestyle='dashed')
+    # plt.plot(x, normalized, label ="$|V_{out}/V_{in}|$", c="darkorange", marker='.', linestyle='solid') # HERE
+    plt.plot(x, V_signal, label="$V_{in}$", c="cornflowerblue", marker='.', linestyle='dashed')
+    #plt.plot(x, V_out, label="$V_{out}$", c="mediumblue", marker='.', linestyle='dashed')
     #plt.plot(df["frequency"], df["channel2"])
     #plt.plot(df["frequency"], df["channel1"])
     #plt.plot(df["frequency"], df["normalized"])
     plt.loglog()
     plt.xlabel("Frequency [Hz]")
-    plt.ylabel("Vout/Vin")
+    plt.ylabel(label)
     plt.legend()
     
     title = get_filename(filename)
@@ -463,13 +482,14 @@ def plot_tf_from_df(df, filename, save_dir, timestamp): # Need to change which c
 ### Beginning of Main ###
 
 # Sweeps frequencies in the range 0, 200 with 20 steps in between
-numPoints = 100
+numPoints = 25
 volt = ['2.0'] # Must be lower than 600mV if using the amplifier!!! Units in V, so 0.6V
 # Run label
-springType = "flexureV2.1_deformed_1.5rot"
+
+
+springType = "top_mbuckle_dummytest"
 # "noAirlegs_flexureNorm_copperPlate_sixPE016springs_2rot-2rot_7136_100x"
-
-
+data_type="V_in"
 
 # Up to 50Hz it's ok. 1,67
 
@@ -487,14 +507,17 @@ if __name__ == "__main__":
         label = springType + "_tf_" + str(numPoints) + "points_" + v +"V"
 
         datestamp = datetime.now().strftime('%Y%m%d')
-        save_folder = f"{datestamp}_{springType}"
+        save_folder = f"{datestamp}_{label}"
 
         save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
 
         frequency = np.logspace(0, 3, num=numPoints) 
         # Will take different frequency values 
         iterations = [1 if freq > 4 else 1 for freq in frequency]
-        time_divisions = ['2s' if freq < 2 else '500ms' if freq < 10 else '200ms' for freq in frequency]
+        # Used to be:
+        # iterations = [1 if freq > 4 else 1 for freq in frequency]
+        time_divisions = ['2s' if freq < 2 else '500ms' if freq < 10 else '200ms' for freq in frequency] # previously
+        # time_divisions = ['2s' if freq < 2 else '500ms' if freq < 10 else '100ms' for freq in frequency] # new option
 
         tf.open_instruments()
         tf.initialize_instruments(voltage=v)
@@ -509,10 +532,12 @@ if __name__ == "__main__":
         ### Saves the data to a csv file
 
         timestamp = datetime.now().strftime('%Y%m%d%H%M')
-        df = save_data_to_csv([frequency, means1, means2], label, save_dir, timestamp)
+
+        # Plot & Save data function should have the channel data type information
+        df = save_data_to_csv([frequency, means1, means2], label, save_dir, timestamp, data_type)
 
         ### Directly use the data to obtain the transfer function
-        plot_tf_from_df(df, label, save_dir, timestamp)
+        plot_tf_from_df(df, label, save_dir, timestamp, data_type)
 
         # Using the built-in method
         # plot_tf(df, label)

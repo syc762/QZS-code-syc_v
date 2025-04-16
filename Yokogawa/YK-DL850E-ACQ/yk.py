@@ -484,11 +484,15 @@ class acq:
             ##### Assuming a linear relation between the voltage range and mechanical travel range
             #### Using the electrical travel distance of 38.1mm
             x = -38.1/self.volt * disp_voltage
-            x = x - np.min(x)  # Zero the minimum displacement
+            print(np.min(x), np.max(x)) 
+            #x = x - np.min(x)  # Zero the minimum displacement
             
             # Average reduction
             x_reduced = average_reduce(x, avg_factor)
+            x_reduced = x_reduced - np.min(x_reduced)  # Zero the minimum displacement
+            
             y_reduced = average_reduce(y, avg_factor)
+            y_reduced = y_reduced - np.min(y_reduced)  # Zero the minimum force
             
             fig = go.Figure(data=go.Scatter(
                 x=x_reduced,
@@ -527,15 +531,15 @@ class acq:
 if __name__ == "__main__":
 
     
-    flexure_type = "flexureV2.1new_0rot_50pts"
-    save_folder=datetime.now().strftime('%Y%m%d')+str("_flexureV2.1")
+    flexure_type = "mbuckle_50pts"
+    save_folder=datetime.now().strftime('%Y%m%d')+str("_mbuckle")
     save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
 
     # Parameters (The sample rate is not being reflected in the settings, defaults to 1kHz. Why?)
     desired_sample_rate='100Hz' # Try 5 samples / sec
     
     # desired_acquisition_time_ms=80000 # milliseconds
-    desired_record_length = 10000
+    desired_record_length = 2000 # 250s if record length is 20000 and desired_sample_rate is 100Hz
     noise_period_ms=41.67
     my_channels = [
         Channel(port=1, data_type='force', data=[]),
