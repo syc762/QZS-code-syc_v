@@ -183,7 +183,6 @@ class acq:
         logging.info(f"Finished setting the desired sampling rate: {sampling_rate}")
         self.sampling_rate = extract_number(sampling_rate)
        
-        
         # Initialize each of the channels
         for channel in self.channels:
             
