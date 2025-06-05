@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import textwrap
 from tqdm import tqdm
 import time
+import math
 import sys
 import pint
 import os
@@ -65,6 +66,67 @@ def convert_to_seconds(time_string):
         raise ValueError('Invalid unit')
     except pint.errors.DimensionalityError:
         raise ValueError('Invalid time string')
+
+def parse_unit_string(value_str):
+    """
+    Parses a string with SI units like '500ms', '2s', '10kHz', '2MHz' and converts it to a float in base units.
+    - Time strings are converted to seconds (s)
+    - Frequency strings are converted to hertz (Hz)
+
+    Supports units: ms, s, Hz, kHz, MHz, GHz
+
+    Returns:
+        float: value in base SI units (seconds or hertz)
+
+    Raises:
+        ValueError: if the format is unrecognized or invalid
+    """
+    value_str = value_str.strip().lower()
+
+    # Ordered by decreasing length to avoid 'hz' matching 'khz' or 'mhz' prematurely
+    unit_multipliers = {
+        'ghz': 1e9,
+        'mhz': 1e6,
+        'khz': 1e3,
+        'hz': 1,
+        'ms': 1e-3,
+        's': 1,
+        'k': 1e3,
+        'm': 1e6,
+    }
+
+    for unit in sorted(unit_multipliers, key=len, reverse=True):
+        if value_str.endswith(unit):
+            number_part = value_str[: -len(unit)].strip()
+            try:
+                return float(number_part) * unit_multipliers[unit]
+            except ValueError:
+                raise ValueError(f"Invalid number in string: {value_str}")
+
+    raise ValueError(f"Unrecognized unit format: {value_str}")
+
+
+# returns the nearest valid record length when using the ACQ class for the Yokogawa scope
+def round_acq_record_length(val):
+    valid_steps = [1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000,
+                   1000000, 2500000, 5000000, 10000000, 25000000, 50000000,
+                   100000000, 250000000, 500000000, 1000000000, 2000000000]
+    return min((x for x in valid_steps if x >= val), default=valid_steps[-1])
+
+# returns the nearest valid sampling rate for the Yokogawa scope
+def round_sample_rate(val):
+    valid_rates = [
+        5,
+        10, 20, 50,
+        1e2, 2e2, 5e2,
+        1e3, 2e3, 5e3,
+        1e4, 2e4, 5e4,
+        1e5, 2e5, 5e5,
+        1e6, 2e6, 5e6,
+        10e6, 20e6, 50e6,
+        100e6
+    ]  # From 100 S/s to 100 MS/s
+    return max((x for x in valid_rates if x <= val), default=valid_rates[0])
 
 
 # Saves data to a .csv file
@@ -248,8 +310,22 @@ class tf:
 
     def __initialize_yokogawa(self, sample_rate='10k', time_div='2s'):
 
+        # Remote control
+        self.yk.write(':COMMunicate:REMote ON')
+        self.logger.info(f"Remote control enabled")
+        remote_status = self.yk.write(':COMMunicate:REMOTE?')
+        self.logger.info(f"Remote status: {remote_status}")
+
         self.yk.write(':STOP')
+        cal_mode = self.yk.write(':CALibrate:MODE?')
+        self.logger.info(f"Current calibration mode: {cal_mode}")
         self.yk.write(':CALIBRATE:MODE OFF')
+        cal_mode = self.yk.write(':CALibrate:MODE?')
+        self.logger.info(f"Calibration mode has been set to: {cal_mode}")
+        
+        self.yk.write(':ACQuire:MODE NORMal')
+        self.yk.write(':WAVEFORM:FORMAT WORD')
+        self.yk.write(':WAVEFORM:BYTEORDER LSBFIRST')
 
         # General Timebase settings
         self.yk.write(':TIMebase:TDIV ' + '1s')
@@ -275,17 +351,17 @@ class tf:
         self.ag.write('VOLTage:OFFSet ' + offset)
         self.ag.write('FREQuency 1')
 
-    def initialize_instruments(self, sample_rate='10kHz', time_div='2s', voltage='10.0', shape='SINusoid', offset='0.0'):
+    def initialize_instruments(self, sample_rate='10k', time_div='2s', voltage='10.0', shape='SINusoid', offset='0.0'):
         self.__sample_rate = sample_rate
         self.__time_div = time_div
         self.__initialize_agilent(voltage=voltage, shape=shape, offset=offset)
         self.__initialize_yokogawa(sample_rate=sample_rate, time_div=time_div)
 
 
-    def __find_peak(self, c, frequency_of_interest, time_div, bin_size=0.5, t_y_p_e='customized'):
+    def __find_peak(self, c, frequency_of_interest, bin_size=0.5, t_y_p_e='customized', timestamp='0'):
 
 
-        def __cap_data(self, c, type=t_y_p_e):
+        def __cap_data(self, c, type=t_y_p_e, timestamp=timestamp):
 
             # print("Obtaining data for channel " + str(c))
             self.yk.write(':WAVeform:TRACE ' + str(c))
@@ -298,7 +374,7 @@ class tf:
 
             result = self.yk.query('WAVEFORM:LENGth?')  # Get waveform length
             waveform_length = int(extract_number(result))
-            print("Waveform length 1: " + str(waveform_length))
+            print("Waveform length: " + str(waveform_length))
 
             n = int(np.floor(waveform_length / self.chunkSize))
 
@@ -323,49 +399,88 @@ class tf:
             voltage_data = waveform_range * np.array(
                 bit_data) * 10 / 24000 + waveform_offset  # formula from the communication manual
 
-            acceleration_data = 9.81 / 10 * voltage_data / 100
-            time_data = np.array(range(len(acceleration_data))) / sampling_rate
-
+            print(f"Voltage data (first 10): {voltage_data[:10]}")
             
-            print(f"acceleration_data: {acceleration_data[:10]}")
+            acceleration_data = 9.81 / 10 * voltage_data / 100
 
+            #  ### Save the raw acceleration data
+            acc_df = pd.DataFrame(acceleration_data, columns=["acceleration (m/s^2)"])
+            acc_df.to_csv(os.path.join(save_dir, f"acceleration_data_{frequency_of_interest}Hz.csv"), index=False)
+
+           
             # Calculate the position power spectral density using welch or periodogram:
             if type == 'welch':
+                
+                ## Set the welch parameters
+                # Welch sampling rate should be at least 2x the highest frequency of interest
+                welch_sampling_rate = 2000
+                welch_nperseg = min(int(30 * sampling_rate / frequency_of_interest), waveform_length/10)
+
+
+                if len(acceleration_data) < welch_nperseg:
+                    print("Warning: Data length < nperseg! You may get degraded PSD resolution.")
 
                 # Previously: freq, psd_acc = sc.signal.welch(acceleration_data, fs=sampling_rate, nperseg=sampling_rate, window='blackman',noverlap=0)       
-                freq, psd_acc = sc.signal.welch(acceleration_data, fs=extract_number(sampling_rate), nperseg=extract_number(sampling_rate) window='blackman', noverlap=0)
+                freq, psd_acc = sc.signal.welch(acceleration_data,
+                                                fs=welch_sampling_rate,
+                                                nperseg=welch_nperseg,
+                                                noverlap=welch_nperseg//2,
+                                                window='hann',
+                                                detrend='constant',
+                                                scaling='density'
+                )
+                print("PSD bin spacing (delta_f):", freq[1] - freq[0])
 
             else: # periodogram
 
                 freq, psd_acc = sc.signal.periodogram(acceleration_data,
                                                       fs=sampling_rate
                                                       )
-            
             freq = freq[1:-1]
             psd_acc = psd_acc[1:-1]
             psd_pos = psd_acc / freq ** 2
             psd_data = psd_pos
             
+            # Save freq, psd_data for each input signal
+            raw_df = pd.DataFrame({'frequency': freq, 'psd_data': psd_data})
+            raw_df.to_csv(os.path.join(save_dir, f"psd_input_{frequency_of_interest}Hz_{timestamp}.csv"), index=False)
+
             ### Plot the fourier spectrum for each channel ###
             print(f"frequency_of_interest = {frequency_of_interest}")
             print(f"freq range = {freq[0]} to {freq[-1]}")
             
-            plt.plot(freq, psd_data, label=f"psd_data for {frequency_of_interest}Hz")
+            ax = plt.gca()
+            upper_limit = min(100 * math.ceil(frequency_of_interest / 100), 1000)
+            ax.set_xlim([0, upper_limit])
+
+            rounded_freq = round(frequency_of_interest, 2)
+            
+            """
+            plt.plot(freq, psd_data, label=f"psd_data for {rounded_freq}Hz")
+            plt.axvline(freq[np.argmax(psd_data)], color='r', linestyle='--')
+            plt.title(f"Peak PSD at {freq[np.argmax(psd_data)]:.2f} Hz")
             plt.xlabel("Frequency [Hz]")
             plt.ylabel("Power Spectral Density [m^2/Hz]")
             plt.title(f"Power Spectral Density for Channel {c} at {frequency_of_interest}Hz")
-            plt.savefig(f"psd_data_{c}_{frequency_of_interest}Hz.png")
+            plt.savefig(os.path.join(save_dir, f"psd_data_{rounded_freq}Hz_{timestamp}.png"))
             plt.close()
-
+            """
+            ####### @>-->---- START HERE ---------
             # Find the max value within bin range_width, centered on frequency_of_interest
             indices = np.where((freq >= frequency_of_interest - bin_size / 2) & (freq <= frequency_of_interest + bin_size / 2))
             psd_data_range = psd_data[indices]
+             
             try:
                 max_value = np.max(psd_data_range)
+                max_value = np.max(psd_data)
+                max_Value_index = np.argmax(psd_data)
+                max_Value_from_index = psd_data[max_Value_index]
             except Exception as e:
                 print(e)
                 return 0
             
+            #self.logger.info(f"Max value for channel {c} at frequency {rounded_freq}Hz: {max_value}")
+            #self.logger.info(f"Max value from index {max_Value_index} at frequency {rounded_freq}Hz: {max_Value_from_index}")
             return max_value ## Lengthy acceleration data and time data. Take the time data and compute v_o*t + 1/2*a*t^2 for displacement 
 
         max_value_list = __cap_data(self, c,  t_y_p_e)    # [__cap_data(self, c) for c in self.channel]
@@ -373,71 +488,85 @@ class tf:
         return max_value_list #, psd_data
 
 
-    def __measurement_cycle(self, frequency, num_iterations, time_div, bin_size=1):
+    def __measurement_cycle(self, frequency, num_iterations, bin_size=1, timestamp='0'):
         
-
-        print("inside the measurement cycle function")
         means = []
 
         self.ag.write('FREQuency ' + str(frequency))
         self.ag.write('OUTPut ON')
-        time.sleep(0.1)
-        
+        time.sleep(4.0) # Wait for the ring-down to settle. Ideally, this will be dynamically adjusted based on the expected resonance of the flexure
         
         # We change the TDIV to 1s to force a refresh and ensure we are getting the most current data
         self.yk.write(':TIMebase:TDIV ' + '1s')
 
-        # Set the timebase sampling rate and time division
-        self.yk.write(':TIMebase:TDIV ' + '20ms') 
-        # Record length = sampling rate * time division
-        # record_length = extract_number(time_div) * extract_number(self.__sample_rate) -> This NEVER WORKS
-        record_length = '100000'
-        self.yk.write(':ACQuire:RLENgth ' + str(record_length))
+        # Set the time division to at leat 10 times the frequency of interest
+        # Total acquisition window (~10 * time_div) spans at least ~100 cycles
+
+        time_div = max(round(2 / frequency), 0.1)  # seconds
         
-        # Set the sample rate
+
+        ### Convert time_div to string format and set the time division
+        self.yk.write(':TIMebase:TDIV ' + str(time_div) + 's')
+        
+        # Set the sampling rate
         self.yk.write(':TIMebase:SRATe ' + self.__sample_rate) # 10kHz
-        print("TIMEBASE SETTING: ")
         
-        srate_query = self.yk.query(':TIMebase:SRATe?')
-        print("timebase SRATE: " + str(srate_query))
-        timediv_query = self.yk.query(':TIMebase:TDIV?')
-        print("timebase TDIV: " + str(timediv_query))
-        print("time_div had been specified as "+str(time_div))
+        # Set the record length
+        record_length = 10 * time_div * int(parse_unit_string(self.__sample_rate))
+        print("sample rate: " + str(int(parse_unit_string(self.__sample_rate))))
+        
+        record_length = round_acq_record_length(record_length)
+        self.logger.info(f"Setting the record length to : {record_length}")
+        self.yk.write(':ACQuire:RLENgth ' + str(record_length))
 
-        w_srate_query = self.yk.query(':WAVeform:SRATe?')
-        print("waveform SRATE: " + str(w_srate_query))
-        w_timediv_query = self.yk.query(':WAVeform:LENGTH?')
-        print("waveform LENGTH: " + str(w_timediv_query))
-
-
-
-        ##### Yokogawa
-        # (Optional) Before data acquisition, refresh to ensure you're not getting old data
-
+        # Check whether the record length is set correctly
+        confirmed_len = extract_number(self.yk.query(':ACQuire:RLENgth?'))
+        self.logger.info(f"Confirmed waveform length: {confirmed_len}, meant to set to {record_length}")
 
         # Waveform capture sequence
-        self.yk.write(':START')
-        time.sleep(60)
+        # Check whether the time division is set correctly
+        actual_time_div = extract_number(self.yk.query(':TIMebase:TDIV?'))
+        self.logger.info(f"Queried TDIV: {actual_time_div}")
+
+        queried_sample_rate = extract_number(self.yk.query(':TIMebase:SRATe?'))
+        self.logger.info(f"Actual sample rate: {queried_sample_rate}")
         
-        """
-        if convert_to_seconds(time_div) < 0.5:
-            time.sleep(12 * convert_to_seconds(time_div))
-        else:
-            time.sleep(11 * convert_to_seconds(time_div))
-        """
+        acquisition_time = float(record_length)/queried_sample_rate * 1.20
+        self.logger.info(f"Will be acquiring for: {acquisition_time} seconds")
+
+        self.yk.write(':START')
+        time.sleep(acquisition_time) # 0.5s for 10kHz sampling rate, 1s for 20kHz sampling rate
         
         self.yk.write(':STOP')   
+
+
+ 
+        # New: give scope time to write waveform to memory
+        time.sleep(1)  # 1–2 seconds delay
+
+        # New: poll until waveform is non-zero length (max wait ~5s)
+        for _ in range(10):
+            waveform_length = int(extract_number(self.yk.query('WAVEFORM:LENGth?')))
+            if waveform_length > 0:
+                break
+            time.sleep(0.5)
+
+        if waveform_length == 0:
+            raise RuntimeError("No waveform data captured. Scope returned length 0.")
+
+        self.logger.info(f"Freq: {frequency:.2f} Hz, TDIV: {actual_time_div}s, SRATE: {queried_sample_rate} Hz, RLEN: {record_length}, WLEN: {waveform_length}")
 
         ####### For each channel, need to __find_peak and obtain the measurement values
         for c in self.channel:
             # measurement_values = [self.__find_peak(c, frequency, time_div, bin_size=bin_size) for _ in tqdm(range(num_iterations))]
-            measurement_values = [self.__find_peak(c, frequency, time_div, bin_size=bin_size, t_y_p_e='welch') for _ in tqdm(range(num_iterations))]
+            measurement_values = [self.__find_peak(c, frequency, bin_size=bin_size, t_y_p_e='welch', timestamp=timestamp) for _ in tqdm(range(num_iterations))]
             
             # measurement_values, acceleration_data = split_even_odd(data)
+            print(f"Measurement values for channel {c}: {measurement_values}")
             
             # Method to collect acceleration data here
             means.append(np.mean(measurement_values))
-            # stds.append(np.std(measurement_values))
+        
             
         self.ag.write('OUTPut OFF')
 
@@ -445,8 +574,9 @@ class tf:
 
 
     ##### *!* Channels
-    def measure(self, frequencies, iterations, time_div, bin_size=1):
+    def measure(self, frequencies, iterations, bin_size=1, timestamp='0'):
         
+        # seconds
         # Hard-coded, assuming two channel input
         results1 = []
         results2 = []
@@ -456,14 +586,22 @@ class tf:
         # pos_norm = []
 
         # NO channel information applied here!
-        for freq, it, t in tqdm(zip(frequencies, iterations, time_div)):
+        for freq, it in tqdm(zip(frequencies, iterations)):
 
             print("beginning of measurement cycle")
-            print(f"Frequency: {freq}, Iterations: {it}, Time Division: {t}")
+            print(f"Frequency: {freq}, Iterations: {it}")
 
-            mean = self.__measurement_cycle(freq, it, t, bin_size=bin_size)
+            mean = self.__measurement_cycle(freq, it, bin_size=bin_size, timestamp=timestamp)
+            """
             results1.append((mean[0]))
-            # results2.append((mean[1])) # HERE
+            results2.append((mean[1])) # HERE
+            """
+
+            if len(mean) > 0:
+                results1.append(mean[0])
+            if len(mean) > 1:
+                results2.append(mean[1])
+            
             # acc1.append(acc[0])
             # acc2.append(acc[1])
             # acc_norm.append(acc[1]/acc[0])
@@ -471,12 +609,14 @@ class tf:
             # pos = acc[1:-1]/freq**2
             # pos_norm.append(pos)
 
-        return results1 #, results2 #, acc1, acc2, acc_norm, pos_norm  #HERE
+        return results1, results2 #, acc1, acc2, acc_norm, pos_norm  #HERE
 
 
     def close_instruments(self):
         self.ag.write('OUTPut OFF')
         self.yk.write(':STOP')
+        self.yk.write(':CALibrate:MODE OFF')
+        self.yk.write(':COMMunicate:REMote OFF')
 
 
 def plot_tf_from_df(df, filename, save_dir, timestamp, label): # Need to change which column it's referring to based on the old excel plots
@@ -525,50 +665,61 @@ def plot_tf_from_df(df, filename, save_dir, timestamp, label): # Need to change 
 ### Beginning of Main ###
 
 # Sweeps frequencies in the range 0, 200 with 20 steps in between
-numPoints = 5
-volt = ['2.0'] # Must be lower than 600mV if using the amplifier!!! Units in V, so 0.6V
-# Run label
+numPoints = 100
+volt = ['1.0']
 
 
-springType = "top_mbuckle_dummytest"
+springType = "top_bestYet2Hz_flexureOnly_0.7076kg_26to1000Hz_4sSleep_x1" # _finer_vol67
 # "noAirlegs_flexureNorm_copperPlate_sixPE016springs_2rot-2rot_7136_100x"
 data_type="V_in"
 
 # Up to 50Hz it's ok. 1,67
 
-
-
+# d
 if __name__ == "__main__":
 
     tf = tf()
     
     for v in volt:
 
-        # Wait for 60s before running each iteration0
-        time.sleep(0.1)
+        # Wait for 60s before running each test with a particular input signal of a particular amplitude
+        time.sleep(1.0)
         
         label = springType + "_tf_" + str(numPoints) + "points_" + v +"V"
 
-        datestamp = datetime.now().strftime('%Y%m%d')
+        datestamp = datetime.now().strftime('%Y%m%d%H%M')
+        timestamp = datetime.now().strftime('%H%M%S') 
         save_folder = f"{datestamp}_{label}"
 
-        save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
+        # save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
+        save_dir = os.path.join(os.path.expanduser(r"Z:\Users\Soyeon\20250522QZS"), save_folder)
 
-        frequency = np.logspace(0, 3, num=numPoints) 
+        frequency = np.logspace(np.log10(35), 3, num=numPoints) #np.log10(30), np.log10(26)
         # Will take different frequency values 
         iterations = [1 if freq > 4 else 1 for freq in frequency]
+        
         # Used to be:
-        # iterations = [1 if freq > 4 else 1 for freq in frequency]
-        time_divisions = ['2s' if freq < 2 else '500ms' if freq < 10 else '200ms' for freq in frequency] # previously
-        # time_divisions = ['2s' if freq < 2 else '500ms' if freq < 10 else '100ms' for freq in frequency] # new option
-        # Get at least 20 waveforms `
-        print("time divisions:")
-        print(time_divisions)
+        
+        """
+        for f in [1,10,100]:
+            
+            time_div = 10 / f
+            print(f"time_div: {time_div}")
+            s_Rate = '10kHz'
+            record_length = 10 * time_div * int(parse_unit_string(s_Rate))
+            print(f"{f}Hz, {time_div} gives record_length of " + str(record_length))
 
-
+        
+        """
+        
+        
         tf.open_instruments()
-        tf.initialize_instruments(voltage=v)
-        all_transfer_data = tf.measure(frequency, iterations, time_divisions, bin_size=1)
+        
+        tf.initialize_instruments(sample_rate='10k', voltage=v)
+        os.makedirs(save_dir, exist_ok=True)
+        all_transfer_data = tf.measure(frequency, iterations, bin_size=1, timestamp=f"{timestamp}")
+        
+       
         tf.close_instruments()
 
         # Assumes we are collecting from two channels only
@@ -578,13 +729,12 @@ if __name__ == "__main__":
 
         ### Saves the data to a csv file
 
-        timestamp = datetime.now().strftime('%Y%m%d%H%M')
-
         # Plot & Save data function should have the channel data type information
-        df = save_data_to_csv([frequency, means1, means2], label, save_dir, timestamp, data_type)
+        df = save_data_to_csv([frequency, means1], label, save_dir, datestamp, data_type)
 
         ### Directly use the data to obtain the transfer function
         plot_tf_from_df(df, label, save_dir, timestamp, data_type)
 
         # Using the built-in method
-        # plot_tf(df, label)
+        # plot_tf(df, label)                                        
+        

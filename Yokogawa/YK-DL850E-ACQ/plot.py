@@ -1,4 +1,5 @@
 import os
+import re
 import matplotlib.pyplot as plt
 import matplotlib
 import pandas as pd
@@ -8,6 +9,13 @@ from scipy.signal import find_peaks
 
 
 matplotlib.rcParams.update({'font.size': 8})
+
+# Extract numeric mass values for sorting
+def extract_mass(col_name):
+    match = re.search(r"([\d.]+)\s*kg", col_name)
+    return float(match.group(1)) if match else float('inf')  # put non-matching labels last
+
+
 
 def normalize(top, bottom, save=False, savedir="./", name="normalized"):
     top_df = pd.read_csv(os.path.join(savedir, top))
@@ -33,18 +41,6 @@ def normalize(top, bottom, save=False, savedir="./", name="normalized"):
 
 def plotTf(x, normalized, V_in, V_out, title='Transfer function', labels=["Plate only"], savedir="~\\Users\students\Desktop\SoyeonChoi"):
  
-    """
-    fig, ax0 = plt.subplots(1,1,figsize=(8,8))
-    line0, = ax0.plot(xfreq, normfreq, label=labels[0])
-    line1, = ax0.plot(xfreq, topfreq, label=labels[1])
-    line2, = ax0.plot(xfreq, botfreq, label=labels[2])
-    ax0.set_title(title, size=12)
-    ax0.set_xscale('log')
-    ax0.set_yscale('log')
-    ax0.set_xlabel("Frequency [Hz]")
-    ax0.set_ylabel("Attenuation |Vout\Vin|")
-    ax0.legend()
-    """
     # Labels used in the past: label="$V_{in}$", "$V_{out}$"
     plt.plot(x, normalized, label ="$|V_{out}/V_{in}|$", c="darkorange", marker='.', linestyle='solid')
     plt.plot(x, V_in, label="$V_{in}$", c="cornflowerblue", marker='.', linestyle='dashed')
@@ -62,12 +58,73 @@ def plotTf(x, normalized, V_in, V_out, title='Transfer function', labels=["Plate
 
     
     
+if __name__ == "__main__":
+    baseDir=r"C:\Users\students\Desktop\SoyeonChoi\dampers\damper_transfer_function_all_masses_interpolated.csv"
+    save_dir = r"C:\Users\students\Desktop\SoyeonChoi"
+    
+    
+    df = pd.read_csv(baseDir, encoding='unicode_escape')
+    # df_peaks = pd.read_csv(r"C:\Users\students\Desktop\SoyeonChoi\c:\Users\students\Desktop\SoyeonChoi", encoding='unicode_escape')
+    # df_peaks.columns = df_peaks.columns.str.strip()  # <-- Strip leading/trailing whitespace
 
-baseDir=r"C:\Users\students\Desktop\SoyeonChoi\QZS\20250305_channelsCombined_flexureV2.1_setupA.2_0rot_DAMPERS_67.1gAdded_tf_400points_4.0V"
-Top="202503052110_transfer_data_botChannel1_topChannel2_flexureV2.1_setupA.2_0rot_DAMPERS_67.1gAdded_tf_400points_4.0V.csv"
-Bot="202503121826_transfer_data_topChannel1_botChannel2_flexureV2.1_setupA.2_0rot_DAMPERS_67.1gAdded_tf_400points_4.0V.csv"
+    # Assume first column is frequency and read in the data
+    frequencies = df.iloc[:, 0]
+    columns = df.columns[1:]  # All other columns are different mass conditions
 
-print("Normalizing...")
-xf, nf, tf, bf = normalize(Top, Bot, True, baseDir, "channelsCombined_flexureV2.1_setupA.2_0rot_DAMPERS_67.1gAdded_tf_400points_4.0V.csv")
 
-plotTf(xf, nf, tf, bf, "4V_Driving_Amp_flexureV2.1_transfer_function", ["Normalized", "V_in", "V_out"], baseDir)
+    # Sort columns based on mass values
+    sorted_columns = sorted(columns, key=extract_mass)
+
+    # Obtain the peak positions
+
+    # Define color palette
+    # adjusted_colors_list = ['cornflowerblue', 'lightcoral','gold']
+    # For the varying mass plot:
+    adjusted_colors_list =['dodgerblue','limegreen', 'gold', 'darkorange', 'firebrick']
+    dampers_colors_list = ['mediumturquoise', 'mediumseagreen','gold','firebrick']
+
+    # Pull up the peak values
+    #peak_dict = {
+    #    row['Mass']: f"{row['Mass']} ({row['Peak']})"
+    #    for _, row in df_peaks.iterrows()
+    #}
+
+    peak_dict = {
+        '0.459kg': '0.459kg (11.29Hz)',
+        '0.821kg': '0.821kg (10.35Hz)',
+        '0.950kg': '0.950kg (8.86Hz)',
+        '1.117kg': '1.117kg (8.27Hz)',
+        '2.000kg': '2.000kg (35.18Hz)'
+    }
+
+    damp_peak_dict = {
+        '0.658kg': '0.658kg',
+        '0.790kg': '0.790kg',
+        '0.950kg': '0.950kg',
+        '2.000kg': '2.000kg',
+    }
+
+    label_dict = {
+        'top': r'$V_{\mathrm{in}}$',
+        'bottom': r'$V_{\mathrm{out}}$',
+        'normalized': r'$V_{\mathrm{out}} / V_{\mathrm{in}}$'
+    }
+
+
+    plt.figure(figsize=(4, 3))
+    # Plot each transfer function
+    print(sorted_columns)
+    for i, col in enumerate(sorted_columns):
+        tf_values = df[col]
+        mass_label = damp_peak_dict.get(col, col)
+
+        color = dampers_colors_list[i % len(dampers_colors_list)]
+        plt.loglog(frequencies, df[col], 'o-', label=mass_label, markersize=1, linewidth=0.5, color=color)
+
+    plt.xlabel("Frequency [Hz]", fontsize=7)
+    plt.ylabel("Transmissibility", fontsize=7) # If PSD [m²/s⁴/Hz]
+    plt.title("Transfer Functions for Varying Mass", fontweight='bold', fontsize=8)
+    plt.grid(True, which="both", linestyle="--", markersize=2, linewidth=0.5)
+    plt.legend(title="Hanging Mass", loc='best', fontsize=5, title_fontproperties={'weight':'bold', 'size':5.5})
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, "dampers_flexureV21._transfer_functions_by_mass_final.png"), dpi=300, bbox_inches='tight')
