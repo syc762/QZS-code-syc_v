@@ -207,24 +207,6 @@ def split_even_odd(lst):
     return even_list, odd_list
 
 
-"""
-if 'frequency domain' or 'resonance' in self.mode:
-                    data['t_acc'] = (9.81 / 10) * t_data / self.amp_gain # Q. Where does this 9.81 value come from?
-                    if 'frequency domain' in self.mode:
-                        # freq, psd_acc = sc.signal.periodogram(data['t_acc'], fs=sampling_rate)
-                        freq, psd_acc = sc.signal.welch(data['t_acc'],fs=sampling_rate,nperseg=sampling_rate,window='blackman',noverlap=0)
-                        
-                        freq = freq[1:-1]
-                        psd_acc = psd_acc[1:-1]
-
-                        data['f'] = freq
-                        data['psd_acc'] = psd_acc
-                        data['psd_pos'] = psd_acc / freq ** 2
-                self.channel_data[channel] = data
-"""
-
-
-
 
 
 def plot_arrays(time, timeData, freq, psdData, plotType):
@@ -411,10 +393,11 @@ class tf:
             # Calculate the position power spectral density using welch or periodogram:
             if type == 'welch':
                 
+                n_cycles=10
                 ## Set the welch parameters
                 # Welch sampling rate should be at least 2x the highest frequency of interest
                 welch_sampling_rate = 2000
-                welch_nperseg = min(int(30 * sampling_rate / frequency_of_interest), waveform_length/10)
+                welch_nperseg = min(int(n_cycles * sampling_rate / frequency_of_interest), waveform_length/10)
 
 
                 if len(acceleration_data) < welch_nperseg:
@@ -425,7 +408,7 @@ class tf:
                                                 fs=welch_sampling_rate,
                                                 nperseg=welch_nperseg,
                                                 noverlap=welch_nperseg//2,
-                                                window='hann',
+                                                window='haming',
                                                 detrend='constant',
                                                 scaling='density'
                 )
@@ -436,14 +419,22 @@ class tf:
                 freq, psd_acc = sc.signal.periodogram(acceleration_data,
                                                       fs=sampling_rate
                                                       )
+            
+            """
             freq = freq[1:-1]
             psd_acc = psd_acc[1:-1]
             psd_pos = psd_acc / freq ** 2
             psd_data = psd_pos
+            """
+            
+            psd_peak_index = np.argmax(psd_acc)
+
             
             # Save freq, psd_data for each input signal
-            raw_df = pd.DataFrame({'frequency': freq, 'psd_data': psd_data})
-            raw_df.to_csv(os.path.join(save_dir, f"psd_input_{frequency_of_interest}Hz_{timestamp}.csv"), index=False)
+            raw_df = pd.DataFrame({'frequency': freq, 'psd_data': psd_acc})
+
+            # NOTE: add the signal type to the filename
+            raw_df.to_csv(os.path.join(save_dir, f"psd_input_{frequency_of_interest}Hz_{psd_peak_index}.csv"), index=False)
 
             ### Plot the fourier spectrum for each channel ###
             print(f"frequency_of_interest = {frequency_of_interest}")
@@ -494,7 +485,7 @@ class tf:
 
         self.ag.write('FREQuency ' + str(frequency))
         self.ag.write('OUTPut ON')
-        time.sleep(4.0) # Wait for the ring-down to settle. Ideally, this will be dynamically adjusted based on the expected resonance of the flexure
+        time.sleep(3.0) # Wait for the ring-down to settle. Ideally, this will be dynamically adjusted based on the expected resonance of the flexure
         
         # We change the TDIV to 1s to force a refresh and ensure we are getting the most current data
         self.yk.write(':TIMebase:TDIV ' + '1s')
@@ -502,7 +493,10 @@ class tf:
         # Set the time division to at leat 10 times the frequency of interest
         # Total acquisition window (~10 * time_div) spans at least ~100 cycles
 
-        time_div = max(round(2 / frequency), 0.1)  # seconds
+        if frequency < 0.1:
+            time_div = 1
+        else:
+            time_div = max(round(2 / frequency), 0.1)  # seconds
         
 
         ### Convert time_div to string format and set the time division
@@ -665,11 +659,11 @@ def plot_tf_from_df(df, filename, save_dir, timestamp, label): # Need to change 
 ### Beginning of Main ###
 
 # Sweeps frequencies in the range 0, 200 with 20 steps in between
-numPoints = 100
-volt = ['1.0']
+numPoints = 52
+volt = ['2.0']
 
 
-springType = "top_bestYet2Hz_flexureOnly_0.7076kg_26to1000Hz_4sSleep_x1" # _finer_vol67
+springType = "top_bestYet2Hz_flexureOnly_0.381kg_1to26Hz_3sSleep_x1" # _finer_vol67
 # "noAirlegs_flexureNorm_copperPlate_sixPE016springs_2rot-2rot_7136_100x"
 data_type="V_in"
 
@@ -694,23 +688,13 @@ if __name__ == "__main__":
         # save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
         save_dir = os.path.join(os.path.expanduser(r"Z:\Users\Soyeon\20250522QZS"), save_folder)
 
-        frequency = np.logspace(np.log10(35), 3, num=numPoints) #np.log10(30), np.log10(26)
+        frequency = [0]
+        #np.logspace(0, np.log10(26), num=numPoints) #np.log10(30), np.log10(26)
         # Will take different frequency values 
         iterations = [1 if freq > 4 else 1 for freq in frequency]
         
         # Used to be:
         
-        """
-        for f in [1,10,100]:
-            
-            time_div = 10 / f
-            print(f"time_div: {time_div}")
-            s_Rate = '10kHz'
-            record_length = 10 * time_div * int(parse_unit_string(s_Rate))
-            print(f"{f}Hz, {time_div} gives record_length of " + str(record_length))
-
-        
-        """
         
         
         tf.open_instruments()
