@@ -1,4 +1,4 @@
-from scipy.signal import welch
+from scipy.signal import welch, find_peaks
 import pandas as pd
 import numpy as np
 import os
@@ -12,40 +12,78 @@ def compute_psd(file_path, sampling_rate, nperseg):
     peak_index = np.argmax(Pxx)
     return f[peak_index], Pxx[peak_index]
 
-def run_welch_loop(example_waveform, fs_default=10000):
-    while True:
-        try:
-            fs = float(input(f"Enter sampling frequency [Hz] (default={fs_default}): ") or fs_default)
-            nperseg = int(input("Enter nperseg value (e.g., 1024): "))
+# def run_welch_loop(example_waveform, fs_default=10000):
+#     while True:
+#         try:
+#             fs = float(input(f"Enter sampling frequency [Hz] (default={fs_default}): ") or fs_default)
+#             nperseg = int(input("Enter nperseg value (e.g., 1024): "))
 
-            freqs, psd = welch(example_waveform, fs=fs, nperseg=nperseg)
+#             freqs, psd = welch(example_waveform, fs=fs, nperseg=nperseg)
             
-            plt.figure(figsize=(5, 3))
-            plt.semilogy(freqs, psd, label=f"nperseg={nperseg}, fs={fs}")
-            plt.xlabel("Frequency [Hz]")
-            plt.ylabel("PSD [V²/Hz]")
-            plt.title("Welch PSD Estimate")
-            plt.grid(True, which="both", linestyle="--", linewidth=0.5)
-            plt.legend()
-            plt.tight_layout()
-            plt.show()
+#             plt.figure(figsize=(5, 3))
+#             plt.semilogy(freqs, psd, label=f"nperseg={nperseg}, fs={fs}")
+#             plt.xlabel("Frequency [Hz]")
+#             plt.ylabel("PSD [V²/Hz]")
+#             plt.title("Welch PSD Estimate")
+#             plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+#             plt.legend()
+#             plt.tight_layout()
+#             plt.show()
 
-            confirm = input("Are you satisfied with these parameters? (y/n): ").lower()
-            if confirm == 'y':
-                return fs, nperseg
-        except Exception as e:
-            print(f"Error: {e}. Please try again.")
+#             confirm = input("Are you satisfied with these parameters? (y/n): ").lower()
+#             if confirm == 'y':
+#                 return fs, nperseg
+#         except Exception as e:
+#             print(f"Error: {e}. Please try again.")
 
+def plot_acceleration_segment(acc_data, freq, fs, channel_label, start_time=0.0, end_time=2.0, save_dir='.'):
+    """
+    Plots a segment of the acceleration data for a specified time range.
+    
+    Parameters:
+        acc_data (np.array): Acceleration data
+        fs (float): Sampling frequency in Hz
+        channel_label (str): Channel label (e.g., "CH1")
+        start_time (float): Start time in seconds
+        end_time (float): End time in seconds
+        save_dir (str): Directory to save the plot
+    """
+    start_idx = int(start_time * fs)
+    end_idx = int(end_time * fs)
+    t_segment = np.arange(start_idx, end_idx) / fs
+    acc_segment = acc_data[start_idx:end_idx]
 
-def plot_psd(frequencies, psd_values, title="Power Spectral Density"):
-    plt.figure(figsize=(8, 5))
-    plt.loglog(frequencies, psd_values, marker='o')
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.xlabel("Frequency (Hz)")
-    plt.ylabel("Power Spectral Density")
-    plt.title(title)
+    plt.figure(figsize=(10, 4))
+    plt.plot(t_segment, acc_segment, label=f'{channel_label} Acceleration')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Acceleration (m/s²)')
+    plt.title(f'{channel_label} Acceleration ({start_time}–{end_time} s)')
+    plt.grid(True)
     plt.tight_layout()
-    plt.savefig("psd_plot.png", dpi=500)
+    filename = f'{channel_label.lower()}_{freq}Hz_acceleration_{start_time:.1f}_{end_time:.1f}s.png'
+    plt.savefig(os.path.join(save_dir, filename))
+    
+
+    # Example usage for CH1: 0 to 2 seconds
+    # plot_acceleration_segment(acc_data=acc_ch1, fs=fs, channel_label="CH1", start_time=0.0, end_time=2.0, save_dir=save_dir)
+
+def plot_psd(psd_data, frequency_of_interest, save_dir):
+    """
+    Plot the Power Spectral Density (PSD) with optional logarithmic scaling.
+    """
+    rounded_freq = round(frequency_of_interest, 2)
+            
+    
+    plt.plot(freq, psd_data, label=f"psd_data for {rounded_freq}Hz")
+    plt.axvline(freq[np.argmax(psd_data)], color='r', linestyle='--')
+    plt.title(f"Peak PSD at {freq[np.argmax(psd_data)]:.2f} Hz")
+    plt.xlabel("Frequency [Hz]")
+    plt.ylabel("Power Spectral Density [m^2/Hz]")
+    plt.title(f"Ch{c} PSD at driving freq {frequency_of_interest}Hz")
+    plt.savefig(os.path.join(save_dir, f"psd_data_{rounded_freq}Hz.png"))
+    plt.close()
+    
+ 
 
 
 
