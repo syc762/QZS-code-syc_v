@@ -12,6 +12,22 @@ def compute_psd(file_path, sampling_rate, nperseg):
     peak_index = np.argmax(Pxx)
     return f[peak_index], Pxx[peak_index]
 
+def optimal_nperseg_for_square(fs, freq, len_acc, max_k=1):
+    """
+    Choose nperseg such that FFT bins fall exactly on odd harmonics of `freq`.
+    """
+    # Trial1.
+    # nperseg = int(max_k * fs / freq)
+
+    # Trial2. Round to next power of 2 for efficient FFT
+    #nperseg = 2 ** int(np.round(np.log2(nperseg)))
+    #nperseg = min(nperseg, len_acc)
+
+    # Trial3. Simpler approach
+    nperseg = fs
+
+    return nperseg
+
 # def run_welch_loop(example_waveform, fs_default=10000):
 #     while True:
 #         try:
@@ -51,7 +67,7 @@ def plot_acceleration_segment(acc_data, freq, fs, channel_label, start_time=0.0,
     start_idx = int(start_time * fs)
     end_idx = int(end_time * fs)
     t_segment = np.arange(start_idx, end_idx) / fs
-    acc_segment = acc_data[start_idx:end_idx]
+    acc_segment = acc_data[start_idx:end_idx]   
 
     plt.figure(figsize=(10, 4))
     plt.plot(t_segment, acc_segment, label=f'{channel_label} Acceleration')
@@ -66,24 +82,39 @@ def plot_acceleration_segment(acc_data, freq, fs, channel_label, start_time=0.0,
 
     # Example usage for CH1: 0 to 2 seconds
     # plot_acceleration_segment(acc_data=acc_ch1, fs=fs, channel_label="CH1", start_time=0.0, end_time=2.0, save_dir=save_dir)
-
-def plot_psd(psd_data, frequency_of_interest, save_dir):
+def plot_psd(c, freq, psd_data, frequency_of_interest, save_dir, log=False):
     """
-    Plot the Power Spectral Density (PSD) with optional logarithmic scaling.
+    Plot the Power Spectral Density (PSD) for a given channel.
+    Highlights the peak value and saves the figure.
     """
     rounded_freq = round(frequency_of_interest, 2)
-            
+
+    # Ensure freq and psd_data are arrays and not empty
+    if len(freq) == 0 or len(psd_data) == 0:
+        print(f"[Warning] Empty PSD data for channel {c} — skipping plot.")
+        return
+
+    # peak_idx = np.argmax(psd_data)
+    # peak_freq = freq[peak_idx]
+    # peak_val = psd_data[peak_idx]
+
+    plt.figure(figsize=(7,5))
+    if log:
+        plt.loglog(freq, psd_data, label=f"CH{c} PSD at {rounded_freq} Hz")
+    else:
+        plt.plot(freq, psd_data)
     
-    plt.plot(freq, psd_data, label=f"psd_data for {rounded_freq}Hz")
-    plt.axvline(freq[np.argmax(psd_data)], color='r', linestyle='--')
-    plt.title(f"Peak PSD at {freq[np.argmax(psd_data)]:.2f} Hz")
+    plt.title(f"CH{c} PSD at driv freq {rounded_freq} Hz")
     plt.xlabel("Frequency [Hz]")
-    plt.ylabel("Power Spectral Density [m^2/Hz]")
-    plt.title(f"Ch{c} PSD at driving freq {frequency_of_interest}Hz")
-    plt.savefig(os.path.join(save_dir, f"psd_data_{rounded_freq}Hz.png"))
+    plt.ylabel("Power Spectral Density [m²/Hz]")
+    plt.legend(fontsize=8)
+    plt.grid(True, which='both', linestyle='--', linewidth=0.4)
+    plt.tight_layout()
+
+    fname = f"CH{c}_psd_{rounded_freq}Hz.png"
+    plt.savefig(os.path.join(save_dir, fname), dpi=300)
     plt.close()
-    
- 
+
 
 
 
