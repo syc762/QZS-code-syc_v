@@ -413,7 +413,11 @@ class tf:
             acc_df.to_csv(os.path.join(save_dir, f"ch{c}_acceleration_data_{frequency_of_interest}Hz.csv"), index=False)
 
             # Plot channel data assuming 10kSamples/s
-            psd.plot_acceleration_segment(acceleration_data, frequency_of_interest, sampling_rate, f"CH{c}", start_time=0.0, end_time=2.0, save_dir=save_dir)
+            if frequency_of_interest > 10:
+                end_time = 0.5
+            else:
+                end_time = 2.0
+            psd.plot_acceleration_segment(acceleration_data, frequency_of_interest, sampling_rate, f"CH{c}", start_time=0.0, end_time=end_time, save_dir=save_dir)
 
             
            
@@ -525,7 +529,7 @@ class tf:
         self.logger.info(f"Actual sample rate - 1st: {queried_sample_rate}")
         
         # Set the record length
-        record_length = 30 * int(parse_unit_string(self.__sample_rate))
+        record_length = 60 * int(parse_unit_string(self.__sample_rate))
         
         record_length = round_acq_record_length(record_length)
         self.logger.info(f"Setting the record length to : {record_length}")
@@ -695,9 +699,9 @@ volt = ['3.0']
 numChannels = 'single' # either 'single' or 'dual'
 
 shapeType = 'SQUare'
-springType = "bestYet2Hz" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
+springType = "bestYet2Hz_0.7076kg" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
 # "noAirlegs_flexureNorm_copperPlate_sixPE016springs_2rot-2rot_7136_100x"
-data_type="ch1top_ch2bot_x100"
+data_type="ch1top_ch2bot_x10"
 
 """
 Enter the driving frequency range.
@@ -727,7 +731,7 @@ if __name__ == "__main__":
         # save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
         save_dir = os.path.join(os.path.expanduser(r"Z:\Users\Soyeon\JulyQZS"), save_folder)
 
-        frequency = [1, 0]
+        frequency = [1,3,5,7,37,80,0.5,0]
         # [0.5, 1.5, 3.5] # np.logspace(np.log10(start_freq), np.log10(end_freq), num=numPoints) #np.log10(30), np.log10(26)
         # np.concatenate([np.arange(10,110,10), np.arange(200, 1100, 100)]) 
 

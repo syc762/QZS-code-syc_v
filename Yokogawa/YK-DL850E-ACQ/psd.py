@@ -12,6 +12,14 @@ def compute_psd(file_path, sampling_rate, nperseg):
     peak_index = np.argmax(Pxx)
     return f[peak_index], Pxx[peak_index]
 
+# Helper: Get PSD at target frequency from raw data
+def get_psd_at_freq(freq_array, psd_array, target_freq, tol=0.1):
+    idx = np.argmin(np.abs(freq_array - target_freq))
+    if abs(freq_array[idx] - target_freq) <= tol:
+        return psd_array[idx]
+    else:
+        return np.nan
+
 def optimal_nperseg_for_square(fs, freq, len_acc, max_k=1):
     """
     Choose nperseg such that FFT bins fall exactly on odd harmonics of `freq`.
@@ -27,6 +35,90 @@ def optimal_nperseg_for_square(fs, freq, len_acc, max_k=1):
     nperseg = fs
 
     return nperseg
+
+
+# --- Select only Odd Overtones in the found peaks ---
+def filter_to_odd_harmonics(freqs, peak_indices, base_freq, max_freq=100, tol=0.1):
+    """Keep only peaks near odd harmonics of base_freq (e.g. 3, 9, 15...)."""
+    odd_harmonics = np.arange(1, int(max_freq // base_freq) + 1, 2) * base_freq
+    filtered = []
+    for i in peak_indices:
+        if any(np.abs(freqs[i] - overtone) <= tol for overtone in odd_harmonics):
+            filtered.append(i)
+    return np.array(filtered)
+
+# Improved version of finding peaks near odd harmonics
+def find_peaks_at_odd_harmonics_summary(freqs, psd, base_freq, fs, tol=0.2, peak_params=None):
+    if peak_params is None:
+        peak_params = {}
+
+    odd_harmonics = np.arange(1, int((fs / 2) // base_freq) + 1, 2) * base_freq
+    
+    summary_rows = []
+
+    for overtone_num, target_freq in zip(np.arange(1, len(odd_harmonics)*2, 2), odd_harmonics):
+        mask = np.where((freqs >= target_freq - tol) & (freqs <= target_freq + tol))[0]
+        if len(mask) == 0:
+            summary_rows.append({
+                "Harmonic": f"{overtone_num}x",
+                "Target_Freq_Hz": target_freq,
+                "Peak_Freq_Hz": np.nan,
+                "Peak_Height": np.nan,
+                "Found": False
+            })
+            continue
+
+        local_psd = psd[mask]
+        local_peaks, _ = find_peaks(local_psd, **peak_params)
+
+        if len(local_peaks) == 0:
+            summary_rows.append({
+                "Harmonic": f"{overtone_num}x",
+                "Target_Freq_Hz": target_freq,
+                "Peak_Freq_Hz": np.nan,
+                "Peak_Height": np.nan,
+                "Found": False
+            })
+        else:
+            # Take the highest peak in this window
+            best_idx = local_peaks[np.argmax(local_psd[local_peaks])]
+            summary_rows.append({
+                "Harmonic": f"{overtone_num}x",
+                "Target_Freq_Hz": target_freq,
+                "Peak_Freq_Hz": freqs[mask[best_idx]],
+                "Peak_Height": local_psd[best_idx],
+                "Found": True
+            })
+
+    return pd.DataFrame(summary_rows)
+
+
+# # --- Restrict peak detection to odd harmonics, then find peaks ---
+# def find_peaks_at_odd_harmonics(freqs, psd, base_freq, fs, tol=0.2, peak_params=None):
+#     """Restrict search to odd harmonics of base_freq, apply find_peaks locally."""
+#     if peak_params is None:
+#         peak_params = {}
+
+#     odd_harmonics = np.arange(1, int((fs / 2) // base_freq) + 1, 2) * base_freq
+#     matched_freqs = []
+#     matched_heights = []
+
+#     for target_freq in odd_harmonics:
+#         # Identify region within ±tol Hz around each harmonic
+#         mask = np.where((freqs >= target_freq - tol) & (freqs <= target_freq + tol))[0]
+#         if len(mask) == 0:
+#             continue
+
+#         local_psd = psd[mask]
+#         local_peaks, props = find_peaks(local_psd, **peak_params)
+#         for i in local_peaks:
+#             matched_freqs.append(freqs[mask[i]])
+#             matched_heights.append(local_psd[i])
+#             matched_labels.append(f"{int(target_freq/base_freq)}x")
+
+#     return np.array(matched_freqs), np.array(matched_heights)
+
+
 
 # def run_welch_loop(example_waveform, fs_default=10000):
 #     while True:
@@ -75,6 +167,7 @@ def plot_acceleration_segment(acc_data, freq, fs, channel_label, start_time=0.0,
     plt.ylabel('Acceleration (m/s²)')
     plt.title(f'{channel_label} Acceleration ({start_time}–{end_time} s)')
     plt.grid(True)
+    plt.ylim(acc_segment.min(), acc_segment.max())  # Explicitly set y-axis to min/max
     plt.tight_layout()
     filename = f'{channel_label.lower()}_{freq}Hz_acceleration_{start_time:.1f}_{end_time:.1f}s.png'
     plt.savefig(os.path.join(save_dir, filename))
