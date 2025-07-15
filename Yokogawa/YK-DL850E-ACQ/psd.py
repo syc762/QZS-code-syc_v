@@ -12,13 +12,25 @@ def compute_psd(file_path, sampling_rate, nperseg):
     peak_index = np.argmax(Pxx)
     return f[peak_index], Pxx[peak_index]
 
-# Helper: Get PSD at target frequency from raw data
-def get_psd_at_freq(freq_array, psd_array, target_freq, tol=0.1):
-    idx = np.argmin(np.abs(freq_array - target_freq))
-    if abs(freq_array[idx] - target_freq) <= tol:
-        return psd_array[idx]
-    else:
-        return np.nan
+# Helper: Get (max PSD, corresponding freq) near target_freq within ±tol
+def get_psd_at_freq(freq_array, psd_array, target_freq, tol=0.2):
+    # Find all indices within the tolerance range
+    mask = (freq_array >= target_freq - tol) & (freq_array <= target_freq + tol)
+    
+    if not np.any(mask):
+        return np.nan, np.nan  # No valid bins within range
+
+    # Extract values in the range
+    freqs_in_range = freq_array[mask]
+    psd_in_range = psd_array[mask]
+
+    # Find max PSD and its corresponding frequency
+    max_idx = np.argmax(psd_in_range)
+    max_psd = psd_in_range[max_idx]
+    max_freq = freqs_in_range[max_idx]
+
+    return max_psd, max_freq
+
 
 def optimal_nperseg_for_square(fs, freq, len_acc, max_k=1):
     """

@@ -192,12 +192,12 @@ if __name__ == "__main__":
     plot_tf = True
     plot_tf_psd_combined = True                                                                                                                    
 
-    basedir = r"Z:\Users\Soyeon\JulyQZS\250709_noDampers_0.381kg\partial_202507091508_bestYet2Hz_ch1top_ch2bot_tf_3.0VSQUare"
+    basedir = r"Z:\Users\Soyeon\JulyQZS\250709_noDampers_0.381kg\done3Hz_202507101324_bestYet2Hz_ch1top_ch2bot_tf_3.0VSQUare"
     fs =10000
     mass = "0.381kg"
     dampers = "noDampers"
     label_peaks_zoomed = True
-    zoom_max_lim = 1000
+    zoom_max_lim = 500
     label_peaks_total = False
 
     # Customizable peak finding parameters
@@ -214,8 +214,8 @@ if __name__ == "__main__":
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-    ch1 = os.path.join(basedir, "ch1_acceleration_data_0.5Hz.csv")
-    ch2 = os.path.join(basedir, "ch2_acceleration_data_0.5Hz.csv")
+    ch1 = os.path.join(basedir, "ch1_acceleration_data_3Hz.csv")
+    ch2 = os.path.join(basedir, "ch2_acceleration_data_3Hz.csv")
 
     freq_ch1 = extract_driving_frequency(ch1)
     freq_ch2 = extract_driving_frequency(ch2)
@@ -291,7 +291,7 @@ if __name__ == "__main__":
         if ch1_missing:
             psd_value_ch1, actual_freq_ch1 = psd.get_psd_at_freq(freq_ch1, psd_ch1, target_freq)
             combined.at[i, 'CH1_PSD'] = psd_value_ch1
-            combined.at[i, 'CH1_PSD_Peak_Freq_Hz'] = actual_freq_ch1
+            combined.at[i, 'CH1_Peak_Freq_Hz'] = actual_freq_ch1
 
         # --- CH2 ---
         ch2_missing = (
@@ -301,7 +301,7 @@ if __name__ == "__main__":
         if ch2_missing:
             psd_value_ch2, actual_freq_ch2 = psd.get_psd_at_freq(freq_ch2, psd_ch2, target_freq)
             combined.at[i, 'CH2_PSD'] = psd_value_ch2
-            combined.at[i, 'CH2_PSD_Peak_Freq_Hz'] = actual_freq_ch2
+            combined.at[i, 'CH2_Peak_Freq_Hz'] = actual_freq_ch2
 
 
     # Compute the transmissibilities for the overtones
