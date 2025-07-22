@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 # -------- Parameters --------
-data_dir = r"Z:\Users\Soyeon\JulyQZS\250709_noDampers_0.381kg\0.381kg_noDampers_finerFreq"
+data_dir = r"Z:\Users\Soyeon\JulyQZS\202507211617_bestYet2Hz_1.040kg_ch1top_ch2bot_x10_tf_3.0VSQUare"
 pattern = "*oddHarmonicPeaks_*.csv"
 zoom_xlim = 100  # Hz
 save_dir = data_dir  # Change if you want plots saved elsewhere
