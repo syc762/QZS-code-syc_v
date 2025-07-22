@@ -192,12 +192,12 @@ if __name__ == "__main__":
     plot_tf = True
     plot_tf_psd_combined = True                                                                                                                    
 
-    basedir = r"Z:\Users\Soyeon\JulyQZS\250709_noDampers_0.381kg\done3Hz_202507101324_bestYet2Hz_ch1top_ch2bot_tf_3.0VSQUare"
+    basedir = r"Z:\Users\Soyeon\JulyQZS\202507212238_bestYet2Hz_dampers_0.880kg_ch1top_ch2bot_x100_tf_3.0VSQUare"
     fs =10000
-    mass = "0.381kg"
+    mass = "0.7076kg"
     dampers = "noDampers"
     label_peaks_zoomed = True
-    zoom_max_lim = 500
+    zoom_max_lim = 100
     label_peaks_total = False
 
     # Customizable peak finding parameters
@@ -214,8 +214,8 @@ if __name__ == "__main__":
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-    ch1 = os.path.join(basedir, "ch1_acceleration_data_3Hz.csv")
-    ch2 = os.path.join(basedir, "ch2_acceleration_data_3Hz.csv")
+    ch1 = os.path.join(basedir, "ch1_acceleration_data_4Hz.csv")
+    ch2 = os.path.join(basedir, "ch2_acceleration_data_4Hz.csv")
 
     freq_ch1 = extract_driving_frequency(ch1)
     freq_ch2 = extract_driving_frequency(ch2)
@@ -245,40 +245,34 @@ if __name__ == "__main__":
     psd_df.to_csv(os.path.join(basedir, psd_csvname), index=False)
 
     # # ---- Peak Detection ----
-    summary_ch1 = psd.find_peaks_at_odd_harmonics_summary(freq_ch1, psd_ch1, driving_freq, fs, tol=0.2, peak_params=peak_params)
-    summary_ch1 = summary_ch1.rename(columns={
-        "Peak_Freq_Hz": "CH1_Peak_Freq_Hz",
-        "Peak_Height": "CH1_PSD",
-        "Found": "CH1_Found"
-    })
+    if driving_freq != 0:
+        summary_ch1 = psd.find_peaks_at_odd_harmonics_summary(freq_ch1, psd_ch1, driving_freq, fs, tol=0.2, peak_params=peak_params)
+        summary_ch1 = summary_ch1.rename(columns={
+            "Peak_Freq_Hz": "CH1_Peak_Freq_Hz",
+            "Peak_Height": "CH1_PSD",
+            "Found": "CH1_Found"
+        })
 
-    summary_ch2 = psd.find_peaks_at_odd_harmonics_summary(freq_ch2, psd_ch2, driving_freq, fs, tol=0.2, peak_params=peak_params)
-    summary_ch2 = summary_ch2.rename(columns={
-        "Peak_Freq_Hz": "CH2_Peak_Freq_Hz",
-        "Peak_Height": "CH2_PSD",
-        "Found": "CH2_Found"
-    })
+        summary_ch2 = psd.find_peaks_at_odd_harmonics_summary(freq_ch2, psd_ch2, driving_freq, fs, tol=0.2, peak_params=peak_params)
+        summary_ch2 = summary_ch2.rename(columns={
+            "Peak_Freq_Hz": "CH2_Peak_Freq_Hz",
+            "Peak_Height": "CH2_PSD",
+            "Found": "CH2_Found"
+        })
     
-    combined = pd.merge(summary_ch1, summary_ch2, on=["Harmonic", "Target_Freq_Hz"], how="outer")
 
-    # # Fill missing CH1 PSDs
-    # missing_ch1 = combined['CH1_Found'] == False
-    # combined.loc[missing_ch1, 'CH1_PSD'] = combined.loc[missing_ch1, 'Target_Freq_Hz'].apply(
-    #     lambda f: psd.get_psd_at_freq(freq_ch1, psd_ch1, f))
+        combined = pd.merge(summary_ch1, summary_ch2, on=["Harmonic", "Target_Freq_Hz"], how="outer")
 
-    # # Fill missing CH2 PSDs
-    # missing_ch2 = combined['CH2_Found'] == False
-    # combined.loc[missing_ch2, 'CH2_PSD'] = combined.loc[missing_ch2, 'Target_Freq_Hz'].apply(
-    #     lambda f: psd.get_psd_at_freq(freq_ch2, psd_ch2, f))
+        # Fill missing CH1 PSDs
+        missing_ch1 = combined['CH1_Found'] == False
+        combined.loc[missing_ch1, 'CH1_PSD'] = combined.loc[missing_ch1, 'Target_Freq_Hz'].apply(
+            lambda f: psd.get_psd_at_freq(freq_ch1, psd_ch1, f))
 
-    # # --- Final safeguard: fill any remaining NaNs using PSD curves ---
-    # combined['CH1_PSD'] = combined.apply(
-    #     lambda row: psd.get_psd_at_freq(freq_ch1, psd_ch1, row['Target_Freq_Hz']) 
-    #     if pd.isna(row['CH1_PSD']) else row['CH1_PSD'], axis=1)
+        # Fill missing CH2 PSDs
+        missing_ch2 = combined['CH2_Found'] == False
+        combined.loc[missing_ch2, 'CH2_PSD'] = combined.loc[missing_ch2, 'Target_Freq_Hz'].apply(
+            lambda f: psd.get_psd_at_freq(freq_ch2, psd_ch2, f))
 
-    # combined['CH2_PSD'] = combined.apply(
-    #     lambda row: psd.get_psd_at_freq(freq_ch2, psd_ch2, row['Target_Freq_Hz']) 
-    #     if pd.isna(row['CH2_PSD']) else row['CH2_PSD'], axis=1)
 
     for i in range(len(combined)):
         target_freq = combined.at[i, 'Target_Freq_Hz']
@@ -305,8 +299,11 @@ if __name__ == "__main__":
 
 
     # Compute the transmissibilities for the overtones
+    
+    
     combined['Transmissibility(Bot/Top)'] =  combined['CH2_PSD'] / combined['CH1_PSD']
 
+    psd_data
     # ---- Save to CSV ----
     filename = f"{timestamp}_oddHarmonicPeaks_{driving_freq}Hz_{int(fs/1e3)}kS_n{nperseg}_{dampers}_{mass}.csv"
     save_path = os.path.join(basedir, filename)
@@ -425,4 +422,5 @@ if plot_psd:
     #     # Save
     #     plt.savefig(os.path.join(basedir, combined_filename), dpi=300)
     #     print(f"Combined PSD+TF plot saved as: {combined_filename}")
+
 

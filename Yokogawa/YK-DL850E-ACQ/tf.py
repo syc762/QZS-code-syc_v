@@ -18,7 +18,6 @@ import pandas as pd
 from datetime import datetime
 from tkinter import Tk
 from tkinter.filedialog import asksaveasfilename
-from simpleplot import get_filename
 import psd as psd
 
 
@@ -29,6 +28,16 @@ ureg = pint.UnitRegistry()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 ###### Function Definitions
+
+
+def get_filename(targetFile, extension='.csv'):
+    # Get the base filename with extension
+    base_filename = os.path.basename(targetFile)
+    
+    # Remove the extension
+    filename_without_extension = os.path.splitext(base_filename)[0]
+    
+    return filename_without_extension
 
 # extracts number in scientific notation from string
 def extract_number(string):
@@ -695,21 +704,21 @@ def plot_tf_from_df(df, filename, save_dir, timestamp, label): # Need to change 
 
 # Sweeps frequencies in the range 0, 200 with 20 steps in between
 numPoints = 1
-volt = ['3.0']
+volt = ['3.0'] # later with amplifier: '2.370'
 numChannels = 'single' # either 'single' or 'dual'
 
-shapeType = 'SQUare'
-springType = "bestYet2Hz_0.7076kg" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
+shapeType = 'SQUare' #'SINusoid' 
+springType = "bestYet2Hz_0.880kg" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
 # "noAirlegs_flexureNorm_copperPlate_sixPE016springs_2rot-2rot_7136_100x"
-data_type="ch1top_ch2bot_x10"
+data_type="ch1top_ch2bot_x100"
 
 """
 Enter the driving frequency range.
 The start_freq and end_freq will be used to generate the frequency array:
 np.logspace(np.log10(start_freq), np.log10(end_freq), num=numPoints)
 """
-#start_freq = 26
-#end_freq = 35
+start_freq = 0
+end_freq = 1000
 
 # Up to 50Hz it's ok. 1,67
 
@@ -725,14 +734,14 @@ if __name__ == "__main__":
         label = springType + "_" + data_type + "_tf_" + v +"V"+ shapeType
 
         datestamp = datetime.now().strftime('%Y%m%d%H%M')
-        timestamp = datetime.now().strftime('%H%M%S') 
+        timestamp = datetime.now().strftime('%H%M%S')
         save_folder = f"{datestamp}_{label}"
 
         # save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
         save_dir = os.path.join(os.path.expanduser(r"Z:\Users\Soyeon\JulyQZS"), save_folder)
 
-        frequency = [1,3,5,7,37,80,0.5,0]
-        # [0.5, 1.5, 3.5] # np.logspace(np.log10(start_freq), np.log10(end_freq), num=numPoints) #np.log10(30), np.log10(26)
+        frequency = [4] # [0.5, 1, 2, 3, 4, 5, 7, 11, 13, 17, 19, 23, 37, 80] # 80Hz = use 2.5V
+        # frequency = np.logspace(np.log10(start_freq), np.log10(end_freq), num=numPoints) #np.log10(30), np.log10(26)
         # np.concatenate([np.arange(10,110,10), np.arange(200, 1100, 100)]) 
 
         # Will take different frequency values 
@@ -751,6 +760,7 @@ if __name__ == "__main__":
         tf.initialize_instruments(sample_rate='10k', voltage=v, shape=shapeType)
         # Can I do a shape='PULSE' with 
         os.makedirs(save_dir, exist_ok=True)
+        time.sleep(0.1)
         all_transfer_data = tf.measure(numChannels, shapeType, frequency, iterations, bin_size=1, timestamp=f"{timestamp}")
         
        

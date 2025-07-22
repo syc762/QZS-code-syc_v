@@ -179,7 +179,7 @@ def plot_acceleration_segment(acc_data, freq, fs, channel_label, start_time=0.0,
     plt.ylabel('Acceleration (m/s²)')
     plt.title(f'{channel_label} Acceleration ({start_time}–{end_time} s)')
     plt.grid(True)
-    plt.ylim(acc_segment.min(), acc_segment.max())  # Explicitly set y-axis to min/max
+    plt.ylim(acc_segment.min()*1.2, acc_segment.max()*1.2)  # Explicitly set y-axis to min/max
     plt.tight_layout()
     filename = f'{channel_label.lower()}_{freq}Hz_acceleration_{start_time:.1f}_{end_time:.1f}s.png'
     plt.savefig(os.path.join(save_dir, filename))
