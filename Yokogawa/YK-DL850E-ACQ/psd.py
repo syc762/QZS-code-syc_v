@@ -32,6 +32,70 @@ def get_psd_at_freq(freq_array, psd_array, target_freq, tol=0.2):
     return max_psd, max_freq
 
 
+def optimal_nperseg(data, fs, freq_of_interest, waveform_length,
+                    min_cycles=5, max_cycles=18, window='hamming', noverlap=None, verbose=False):
+    """
+    Return the nperseg that minimizes:
+    sqrt( (bin_freq - freq_of_interest)^2 + (peak_freq - freq_of_interest)^2 )
+    
+    Optimization criteria:
+    1. top_data's maximum psd occurs at freq_of_interest
+    2. bin spacings are aligned with freq_of_interest (i.e. freq_of_interest falls into a bin)
+    """
+    best_nperseg = None
+    best_k = None
+    best_peak_freq = None
+    best_combined_error = np.inf
+    best_bin_error = None
+    best_psd_error = None
+
+    for n_cycles in range(min_cycles, max_cycles + 1):
+        nperseg_cand = int(round(n_cycles * fs / freq_of_interest))
+        nperseg_cand = min(max(nperseg_cand, 32), waveform_length)  # Clamp safely
+
+        if noverlap is None:
+            safe_noverlap = min(nperseg_cand - 1, nperseg_cand // 2)
+        else:
+            safe_noverlap = min(nperseg_cand - 1, noverlap)
+
+        k = max(1, int(round(freq_of_interest * nperseg_cand / fs)))
+        bin_freq = k * (fs / nperseg_cand)
+        bin_error = abs(freq_of_interest - bin_freq)
+
+        freqs, psd = welch(data, fs=fs, window=window,
+                           nperseg=nperseg_cand, noverlap=safe_noverlap)
+
+        peaks, _ = find_peaks(psd)
+        if len(peaks) == 0:
+            continue
+
+        peak_freqs = freqs[peaks]
+        nearest_idx = np.argmin(np.abs(peak_freqs - freq_of_interest))
+        nearest_freq = peak_freqs[nearest_idx]
+        psd_error = abs(freq_of_interest - nearest_freq)
+
+        combined_error = np.sqrt(bin_error**2 + psd_error**2)
+
+        if verbose:
+            print(f"nperseg: {nperseg_cand}, k: {k}, bin_freq: {bin_freq:.2f}, "
+                  f"peak_freq: {nearest_freq:.2f}, bin_error: {bin_error:.2f}, "
+                  f"psd_error: {psd_error:.2f}, combined_error: {combined_error:.2f}")
+
+        if combined_error < best_combined_error:
+            best_combined_error = combined_error
+            best_nperseg = nperseg_cand
+            best_k = k
+            best_peak_freq = nearest_freq
+            best_bin_error = bin_error
+            best_psd_error = psd_error
+
+    if best_nperseg is None:
+        raise RuntimeError("No valid nperseg found within the specified cycle range.")
+
+    return best_nperseg, best_k, best_peak_freq, best_bin_error, best_psd_error
+
+
+
 def optimal_nperseg_for_square(fs, freq, len_acc, max_k=1):
     """
     Choose nperseg such that FFT bins fall exactly on odd harmonics of `freq`.

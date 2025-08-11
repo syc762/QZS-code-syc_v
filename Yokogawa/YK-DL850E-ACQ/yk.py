@@ -530,15 +530,15 @@ class acq:
 if __name__ == "__main__":
 
     
-    flexure_type = "mbuckle_50pts"
-    save_folder=datetime.now().strftime('%Y%m%d')+str("_mbuckle")
-    save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
+    flexure_type = "bestYet2Hz_50pts_mbuckle_0rot_belleville_FOnly"
+    save_folder=datetime.now().strftime('%Y%m%d')+str("_")+flexure_type
+    save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS\FvsD_August11"), save_folder)
 
     # Parameters (The sample rate is not being reflected in the settings, defaults to 1kHz. Why?)
     desired_sample_rate='100Hz' # Try 5 samples / sec
     
     # desired_acquisition_time_ms=80000 # milliseconds
-    desired_record_length = 2000 # 250s if record length is 20000 and desired_sample_rate is 100Hz
+    desired_record_length = 10000 # 250s if record length is 20000 and desired_sample_rate is 100Hz
     noise_period_ms=41.67
     my_channels = [
         Channel(port=1, data_type='force', data=[]),

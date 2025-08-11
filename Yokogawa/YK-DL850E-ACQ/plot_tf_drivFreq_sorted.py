@@ -8,7 +8,7 @@ import numpy as np
 from scipy.signal import find_peaks
 
 # -------- Parameters --------
-data_dir = r"Z:\Users\Soyeon\JulyQZS\202507211617_bestYet2Hz_1.040kg_ch1top_ch2bot_x10_tf_3.0VSQUare"
+data_dir = r"Z:\Users\Soyeon\JulyQZS\202508041304_bestYet2Hz_1.19kg_ch1top_ch2bot_x10_tf_3.0VSQUare"
 pattern = "*oddHarmonicPeaks_*.csv"
 zoom_xlim = 100  # Hz
 save_dir = data_dir  # Change if you want plots saved elsewhere
@@ -20,9 +20,9 @@ custom_colors = {
 }
 
 # -------- Extract Meta Info from Directory --------
-dampers = "Dampers" if "Dampers" in data_dir else "noDampers"
+dampers = "Dampers" if "Dampers" in data_dir.lower() else "noDampers"
 mass_match = re.search(r'_(\d+\.\d+)kg', data_dir)
-mass_str = mass_match.group(1) + "kg" if mass_match else "unknownMass"
+mass_str = mass_match.group(1) + "kg" if mass_match else "0.498kg"
 # Create timestamp string
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -93,6 +93,19 @@ y_sorted = all_y[sorted_indices]
 labels_sorted = all_labels[sorted_indices]
 colors_sorted = all_colors[sorted_indices]
 
+# Save the data for easy access
+# -------- Save Sorted Data to CSV --------
+sorted_df = pd.DataFrame({
+    'Frequency_Hz': x_sorted,
+    'Transmissibility': y_sorted,
+    'Label': labels_sorted
+})
+
+sorted_csv_name = f"{timestamp}_sortedTransmissibility_{mass_str}_{dampers}.csv"
+sorted_df.to_csv(os.path.join(save_dir, sorted_csv_name), index=False)
+print(f"Saved sorted data to: {sorted_csv_name}")
+
+
 # # Group data by different color schemes
 # unique_labels = np.unique(labels_sorted)
 
@@ -103,7 +116,9 @@ colors_sorted = all_colors[sorted_indices]
 
 
 # -------- Find Peaks --------
-peak_indices, _ = find_peaks(y_sorted, prominence=0.05)  # adjust prominence as needed
+peak_indices, _ = find_peaks(y_sorted,
+                             prominence=0.1,
+                             distance=2)  # adjust prominence as needed
 peak_freqs = x_sorted[peak_indices]
 peak_vals = y_sorted[peak_indices]
 
@@ -120,14 +135,18 @@ print(f"Saved peak data to: {peak_csv_name}")
 title_full = f"Transmissibility vs Frequency — {mass_str}, {dampers}"
 plt.title(title_full)
  # explicitly set log scale
-plt.semilogy(x_sorted, y_sorted, marker='o', markersize=2, linestyle='--', color='tab:pink')
+plt.semilogy(x_sorted, y_sorted, marker='o', markersize=2, linestyle='--', color='tab:red')
 plt.xlabel("Peak Frequency [Hz]")
 plt.ylabel("Transmissibility (CH2_PSD / CH1_PSD)")
 plt.grid(True, which='both', linestyle='--')
 plt.legend(fontsize=8, loc='best')
 plt.tight_layout()
 if label_peaks:
-    plt.semilogy(peak_freqs, peak_vals, 'v', markersize=4, label="Peaks") 
+    plt.semilogy(peak_freqs, peak_vals, 'v', markersize=4, label="Peaks")
+
+    for x, y in zip(peak_freqs, peak_vals):
+        plt.text(x, y * 1.05, f"{x:.1f}Hz", ha='center', va='bottom', fontsize=7, rotation=45)
+
 
 filename_full = f"{timestamp}_transmissibility_full_{mass_str}_{dampers}.png"
 plt.savefig(os.path.join(save_dir, filename_full), dpi=300)
@@ -138,7 +157,7 @@ plt.figure(figsize=(10, 6))
 
 title_zoomed = f"Zoomed Transmissibility (x ≤ {zoom_xlim} Hz) — {mass_str}, {dampers}"
 plt.title(title_zoomed)
-plt.semilogy(x_sorted, y_sorted, marker='o', markersize=2, linestyle='--', color='tab:pink')
+plt.semilogy(x_sorted, y_sorted, marker='o', markersize=2, linestyle='--', color='tab:red')
 plt.xlabel("Peak Frequency [Hz]")
 plt.ylabel("Transmissibility (CH2_PSD / CH1_PSD)")
 plt.xlim(0, zoom_xlim)
@@ -147,6 +166,10 @@ plt.legend(fontsize=8, loc='best')
 plt.tight_layout()
 if label_peaks:
     plt.semilogy(peak_freqs, peak_vals, 'v', markersize=4, label="Peaks")
+
+    for x, y in zip(peak_freqs, peak_vals):
+        plt.text(x, y * 1.05, f"{x:.1f}Hz", ha='center', va='bottom', fontsize=7, rotation=45)
+
 
 filename_zoom = f"{timestamp}_transmissibility_zoomed{zoom_xlim}Hz_{mass_str}_{dampers}.png"
 plt.savefig(os.path.join(save_dir, filename_zoom), dpi=300)

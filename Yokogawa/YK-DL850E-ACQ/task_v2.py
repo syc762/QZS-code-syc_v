@@ -17,6 +17,52 @@ def extract_driving_frequency(filename):
         return float(match.group(1))
     return None
 
+def extract_metadata_from_path(path):
+    """
+    Extract metadata from a directory path string, such as mass, gain, waveform type, and damper configuration.
+
+    Parameters:
+    -----------
+    path : str
+        The full directory path containing metadata in the folder name (e.g., '..._1.3511kg_x10_VSQUare_vhDamp...').
+
+    Returns:
+    --------
+    dict
+        A dictionary containing:
+        - 'mass' (str): e.g., '1.3511kg' or 'unknown_mass'
+        - 'gain' (str): e.g., 'x10' or 'unknown_gain'
+        - 'waveform' (str): 'VSQUARE', 'VSINUSOID', or 'Unknown'
+        - 'dampers' (str): e.g., 'vhDamp', 'hDamp', 'vDamp', 'Dampers', or 'noDampers'
+
+    Notes:
+    ------
+    - Case-insensitive match is used for waveform detection.
+    - If no matching keywords are found, default values are returned.
+    """
+    mass_match = re.search(r'(\d+\.\d+)kg', path)
+    gain = re.search(r'x(\d+)', path)
+    waveform = "VSQUARE" if "VSQU" in path.upper() else "VSINUSOID" if "VSIN" in path.upper() else "Unknown"
+
+    damper_label = "noDampers"
+    if "vhDamp" in path:
+        damper_label = "vhDamp"
+    elif "hDamp" in path:
+        damper_label = "hDamp"
+    elif "vDamp" in path:
+        damper_label = "vDamp"
+    elif re.search(r'damp', path, re.IGNORECASE):
+        damper_label = "Dampers"
+
+    return {
+        "mass": f"{mass_match.group(1)}kg" if mass_match else "unknown_mass",
+        "gain": f"x{gain.group(1)}" if gain else "unknown_gain",
+        "waveform": waveform,
+        "dampers": damper_label
+    }
+
+
+
 def get_filename(targetFile, extension='.csv'):
     # Get the base filename with extension
     base_filename = os.path.basename(targetFile)
@@ -189,11 +235,16 @@ def plot_return_tf(f, save_dir, filename="someFile.png", save=False):
 if __name__ == "__main__":
     
     # -------- CONFIG --------
-    basedir = r"Z:\Users\Soyeon\JulyQZS\202507211617_bestYet2Hz_1.040kg_ch1top_ch2bot_x10_tf_3.0VSQUare"  
+    basedir = r"Z:\Users\Soyeon\JulyQZS\202508040929_bestYet2Hz_0.9383kg_ch1top_ch2bot_x10_tf_3.0VSQUare"
     fs = 10000
     zoom_max_lim = 100
-    mass = "1.040kg"
-    dampers = "noDampers"
+    
+    metadata = extract_metadata_from_path(basedir)
+    mass = metadata["mass"]
+    dampers = metadata["dampers"]
+
+    print(f"Processing data for {mass}-{dampers}")
+
     label_peaks_zoomed = True
     label_peaks_total = False
 
@@ -201,7 +252,7 @@ if __name__ == "__main__":
     plot_psd_flag = True
 
     peak_params = {
-        'height': 1e-8,
+        'height': 1e-7,
         'distance': None,
         'prominence': None,
         'width': None

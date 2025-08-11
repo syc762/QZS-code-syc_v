@@ -15,8 +15,8 @@ from plotly.subplots import make_subplots
 
 
 # -------- CONFIG --------
-root_dir = r"Z:\Users\Soyeon\JulyQZS\202507211238_bestYet2Hz_0.7076kg_ch1top_ch2bot_x10_tf_3.0VSQUare"
-pattern = "*oddHarmonicPeaks_*Hz_*kS_n*_dampers_*.csv"
+root_dir = r"Z:\Users\Soyeon\JulyQZS\250801_group_meeting_plot"
+pattern = "*oddHarmonicPeaks_*Hz_*kS_n*_*_*.csv"
 zoom_xlim = 100
 label_peaks = False
 

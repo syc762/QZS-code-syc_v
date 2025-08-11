@@ -703,22 +703,22 @@ def plot_tf_from_df(df, filename, save_dir, timestamp, label): # Need to change 
 ### Beginning of Main ###
 
 # Sweeps frequencies in the range 0, 200 with 20 steps in between
-numPoints = 500
+numPoints = 10
 volt = ['3.0'] # later with amplifier: '2.370'
 numChannels = 'single' # either 'single' or 'dual'
 
-shapeType = 'SQUare' # 'SINusoid' 
-springType = "bestYet2Hz_can_vDamp_kg" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
+shapeType = 'SINusoid'  #  'SQUare'
+springType = "bestYet2Hz_1.19kg" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
 # "noAirlegs_flexureNorm_copperPlate_sixPE016springs_2rot-2rot_7136_100x"
-data_type="ch1top_ch2bot_x100"
+data_type="ch1top_ch2bot_x10"
 
 """
 Enter the driving frequency range.
 The start_freq and end_freq will be used to generate the frequency array:
 np.logspace(np.log10(start_freq), np.log10(end_freq), num=numPoints)
 """
-start_freq = 0
-end_freq = 1000
+start_freq = 1
+end_freq = 100
 
 # Up to 50Hz it's ok. 1,67
 
@@ -740,9 +740,40 @@ if __name__ == "__main__":
         # save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
         save_dir = os.path.join(os.path.expanduser(r"Z:\Users\Soyeon\JulyQZS"), save_folder)
 
-        frequency = [0.3, 0.5, 0.7, 1, 2, 3, 4, 5, 7, 11, 13, 17, 19, 23, 37, 80] # 80Hz = use 2.5V
-        #frequency = np.logspace(np.log10(start_freq), np.log10(end_freq), num=numPoints) #np.log10(30), np.log10(26)
-        # np.concatenate([np.arange(10,110,10), np.arange(200, 1100, 100)]) 
+        baseFreq = [0.3, 0.5, 0.7, 1, 1.2, 2, 2.5, 3, 3.7, 5, 7, 7.6, 11, 13, 14.8, 17, 19, 19.7, 21.1, 19, 23, 23.5, 26, 29, 31, 37, 80] # 80Hz = use 2.5V
+
+        if shapeType == 'SQUare':
+            frequency = baseFreq
+        else: 
+            
+            '''
+            Option1
+            '''
+            # First 50 odd harmonics: 1st to 99th (step 2)
+            odd_multipliers = np.arange(1, 100, 2)
+
+            # Compute harmonics using outer product
+            harmonics_matrix = np.outer(baseFreq, odd_multipliers)
+
+            # Filter values ≤ 1000 Hz, flatten, sort, remove duplicates
+            all_odd_harmonics_capped = np.unique(harmonics_matrix[harmonics_matrix <= 1000])
+
+            # Optionally convert to a list
+            harmonics_list = all_odd_harmonics_capped.tolist()
+            print("The number of frequencies to sweep over: " + str(len(harmonics_list)))
+            # input("Press Enter to continue: ")
+
+            # Print as comma-separated values (rounded for clarity)
+            #print(", ".join(f"{h:.2f}" for h in harmonics_list))
+
+            frequency = harmonics_list
+
+            '''
+            Option2
+            '''
+            #frequency = np.logspace(np.log10(start_freq), np.log10(end_freq), num=numPoints) #np.log10(30), np.log10(26)
+            
+        
 
         # Will take different frequency values 
         iterations = [1 if freq > 4 else 1 for freq in frequency]
@@ -760,7 +791,7 @@ if __name__ == "__main__":
         tf.initialize_instruments(sample_rate='10k', voltage=v, shape=shapeType)
         # Can I do a shape='PULSE' with 
         os.makedirs(save_dir, exist_ok=True)
-        time.sleep(20)
+        time.sleep(1)
         all_transfer_data = tf.measure(numChannels, shapeType, frequency, iterations, bin_size=1, timestamp=f"{timestamp}")
         
        

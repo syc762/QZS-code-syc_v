@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 # -------- Parameters --------
-data_dir = r"Z:\Users\Soyeon\JulyQZS\202507211617_bestYet2Hz_1.040kg_ch1top_ch2bot_x10_tf_3.0VSQUare"
+data_dir = r"Z:\Users\Soyeon\JulyQZS\202508011402_bestYet2Hz_0.6038kg_ch1top_ch2bot_x10_tf_3.0VSQUare"
 pattern = "*oddHarmonicPeaks_*.csv"
 zoom_xlim = 100  # Hz
 save_dir = data_dir  # Change if you want plots saved elsewhere
@@ -18,7 +18,7 @@ custom_colors = {
 }
 
 # -------- Extract Meta Info from Directory --------
-dampers = "noDampers" if "noDampers" in data_dir else "Dampers"
+dampers = "noDampers" if "noDampers" in data_dir else "vh_Dampers"
 mass_match = re.search(r'_(\d+\.\d+)kg', data_dir)
 mass_str = mass_match.group(1) + "kg" if mass_match else "unknownMass"
 # Create timestamp string
