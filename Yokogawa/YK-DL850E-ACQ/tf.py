@@ -570,6 +570,7 @@ class tf:
 
         # Write to a text file the final queried_sample_rate, the actual_time_div, and the record_length for the driving frequency
         with open(os.path.join(save_dir, f"{frequency}Hz_README.txt"), 'w') as f:
+            f.write(f"Input waveform shape: {shapeType} \n")
             f.write(f"Frequency: {frequency} Hz\n")
             f.write(f"Sample Rate: {queried_sample_rate} Hz\n")
             f.write(f"Time Division: {actual_time_div} s\n")
@@ -708,7 +709,7 @@ volt = ['3.0'] # later with amplifier: '2.370'
 numChannels = 'single' # either 'single' or 'dual'
 
 shapeType = 'SINusoid'  #  'SQUare'
-springType = "bestYet2Hz_1.19kg" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
+springType = "print1_0.0631kg" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
 # "noAirlegs_flexureNorm_copperPlate_sixPE016springs_2rot-2rot_7136_100x"
 data_type="ch1top_ch2bot_x10"
 
@@ -717,7 +718,7 @@ Enter the driving frequency range.
 The start_freq and end_freq will be used to generate the frequency array:
 np.logspace(np.log10(start_freq), np.log10(end_freq), num=numPoints)
 """
-start_freq = 1
+start_freq = 0.1
 end_freq = 100
 
 # Up to 50Hz it's ok. 1,67
@@ -738,7 +739,7 @@ if __name__ == "__main__":
         save_folder = f"{datestamp}_{label}"
 
         # save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
-        save_dir = os.path.join(os.path.expanduser(r"Z:\Users\Soyeon\JulyQZS"), save_folder)
+        save_dir = os.path.join(os.path.expanduser(r"Z:\Users\Soyeon\AugustQZS"), save_folder)
 
         baseFreq = [0.3, 0.5, 0.7, 1, 1.2, 2, 2.5, 3, 3.7, 5, 7, 7.6, 11, 13, 14.8, 17, 19, 19.7, 21.1, 19, 23, 23.5, 26, 29, 31, 37, 80] # 80Hz = use 2.5V
 
@@ -749,30 +750,30 @@ if __name__ == "__main__":
             '''
             Option1
             '''
-            # First 50 odd harmonics: 1st to 99th (step 2)
-            odd_multipliers = np.arange(1, 100, 2)
+            # # First 50 odd harmonics: 1st to 99th (step 2)
+            # odd_multipliers = np.arange(1, 100, 2)
 
-            # Compute harmonics using outer product
-            harmonics_matrix = np.outer(baseFreq, odd_multipliers)
+            # # Compute harmonics using outer product
+            # harmonics_matrix = np.outer(baseFreq, odd_multipliers)
 
-            # Filter values ≤ 1000 Hz, flatten, sort, remove duplicates
-            all_odd_harmonics_capped = np.unique(harmonics_matrix[harmonics_matrix <= 1000])
+            # # Filter values ≤ 1000 Hz, flatten, sort, remove duplicates
+            # all_odd_harmonics_capped = np.unique(harmonics_matrix[harmonics_matrix <= 1000])
 
-            # Optionally convert to a list
-            harmonics_list = all_odd_harmonics_capped.tolist()
-            print("The number of frequencies to sweep over: " + str(len(harmonics_list)))
-            # input("Press Enter to continue: ")
+            # # Optionally convert to a list
+            # harmonics_list = all_odd_harmonics_capped.tolist()
+            # print("The number of frequencies to sweep over: " + str(len(harmonics_list)))
+            # # input("Press Enter to continue: ")
 
-            # Print as comma-separated values (rounded for clarity)
-            #print(", ".join(f"{h:.2f}" for h in harmonics_list))
+            # # Print as comma-separated values (rounded for clarity)
+            # #print(", ".join(f"{h:.2f}" for h in harmonics_list))
 
-            frequency = harmonics_list
+            # frequency = harmonics_list
 
             '''
             Option2
             '''
-            #frequency = np.logspace(np.log10(start_freq), np.log10(end_freq), num=numPoints) #np.log10(30), np.log10(26)
-            
+            # frequency = np.logspace(np.log10(start_freq), np.log10(end_freq), num=numPoints) #np.log10(30), np.log10(26)
+            frequency = np.arange(1,100,10)
         
 
         # Will take different frequency values 

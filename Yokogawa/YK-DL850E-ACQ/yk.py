@@ -85,7 +85,7 @@ class acq:
     def __init__(self, channels=None, mode=['X vs Y'], amp_gain=1,
                  volt=None, load_volt=None,
                  acquisition_time=None, sampling_rate=None, record_length=None,
-                 noise_period_ms=None):
+                 V_o_force = 0.57271308, V_o_disp = 0.200629953):
         """
         Initialize the acq Data collector with time control options.
 
@@ -107,11 +107,13 @@ class acq:
         # Parameters that will vary by measurement
         self.load_volt = load_volt
         self.volt = volt # The total voltage applied to the displacement sensor (Needed to compute the distance traveled)
+        self.V_o_force = V_o_force
+        self.V_o_disp = V_o_disp
         self.acquisition_time = acquisition_time # Desired acquisition time in seconds
         self.sampling_rate = sampling_rate # Desired sampling rate in Hz
         self.record_length = record_length # Desired number of points to collect 
-        self.noise_period_ms = noise_period_ms # Period of noise to filter out in milliseconds
         self.timestamp = None
+        self.corrected_csv = None # Store the corrected file path
 
         # Configure logging
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -256,15 +258,12 @@ class acq:
     
     # Currently, the run() function contains initialization steps and yk.close()
     def run(self):
-        # Check sampling rate
+        # Check sampling rate & settings
         sampling_rate = self._verify_sampling_rate()
         self.record_length = self._verify_record_length()
         self._verify_format_settings()
 
-        # Calculate total iterations for all channels
-        
-        # Waveform capture sequence
-        acquisition_time = self.record_length/sampling_rate
+        acquisition_time = self.record_length / sampling_rate
         self.logger.info(f"Oscilloscope will be acquiring data for: {acquisition_time:.2f} seconds")
         self.yk.write(':START')
         self.yk.write(':BEEP')
@@ -272,126 +271,136 @@ class acq:
         time.sleep(acquisition_time)
         self.yk.write(':STOP')
         self.yk.write(':BEEP')
-        self.logger.info(f"Oscilloscope acquired data for approximately {time.time()-start_time:.2f} seconds")
+        self.logger.info(f"Oscilloscope acquired data for ~{time.time()-start_time:.2f} s")
 
-        # Create one progress bar for the entire operation
-        
-        # @ For debugging purposes only, a list of the raw data before converting it for the correct data type
+        # Ensure both channels are displayed
+        self.yk.write(':CHANnel1:DISPlay ON')
+        self.yk.write(':CHANnel2:DISPlay ON')
+
+        # Dict to collect columns for CSV
         data_raw = {}
 
         for channel in self.channels:
-            
             self.logger.info(f"Gathering data from channel {channel.port}-{channel.data_type}")
-            self.yk.write(':WAVeform:TRACE ' + str(channel.port))
-            
-            # Get waveform length
-            # length = int(extract_number(self.yk.query(':ACQuire:RLENGth?')))
-            self.logger.info(f"Expected waveform length is: {self.record_length}")
-            acquired_waveform_length = extract_number(self.yk.query(':ACQuire:RLENgth?'))
-            self.logger.info(f"The acquired waveform length is: {acquired_waveform_length}")
-            
-            # Initialize the data storage dictionary and list
-            data = {}
+            self.yk.write(f':WAVeform:TRACe {channel.port}')
 
-            # Set the waveform start and end points
-            start_point = 0
-            end_point = acquired_waveform_length - 1
-            self.yk.write(":WAVEFORM:START {};:WAVEFORM:END {}".format(start_point, end_point))
-            self.logger.info(f"Capturing waveform from {start_point} to {end_point}")
-        
-                    
+            # Expected length
+            self.logger.info(f"Expected waveform length is: {self.record_length}")
+            acquired_waveform_length = int(extract_number(self.yk.query(':ACQuire:RLENgth?')))
+            self.logger.info(f"The acquired waveform length is: {acquired_waveform_length}")
+
+            # Full range for this channel
+            self.yk.write(f":WAVEFORM:START 0;:WAVEFORM:END {acquired_waveform_length - 1}")
+
             # Retrieve the binary waveform data, h=signed short
             t_data_raw = self.yk.query_binary_values('WAVEFORM:SEND?', datatype='h', container=list)
             self.logger.info(f"Raw data first 5 values for channel {channel.port}: {t_data_raw[:5]}")
             self.logger.info(f"Raw data last 5 values for channel {channel.port}: {t_data_raw[-5:]}")
             self.logger.info(f"Waveform data sent to the computer")
-            
-            # Save the raw data 
-            data_raw[f"{channel.port}_{channel.data_type}"] = t_data_raw
-              
-        
-            """Process the channel data"""
 
-            # Query the waveform parameters @
+            # Query the waveform parameters
             waveform_offset = self.yk.query(':WAVEFORM:OFFSET?')
-            self.logger.info(f"Waveform offset: {waveform_offset}")
             offset = extract_number(waveform_offset)
 
             waveform_range = self.yk.query(':WAVeform:RANGe?')
-            self.logger.info(f"Waveform range: {waveform_range}")
             w_range = extract_number(waveform_range)
 
-            
-            # Convert the raw waveform data
-            t_data = (w_range * np.array(t_data_raw, dtype=float) * 10.0) / 24000.0 + offset
-            self.logger.info(f"Converted data first 5 values for channel {channel.port}: {t_data[:5]}")
-   
+            # Convert raw codes to volts
+            t_data_volt = (w_range * np.array(t_data_raw, dtype=float) * 10.0) / 24000.0 + offset
+            self.logger.info(f"Converted data first 5 values for channel {channel.port}: {t_data_volt[:5]}")
 
-            # Process data based on mode
+            # Store converted voltages in the CSV data dict
+            data_raw[f"{channel.port}_{channel.data_type}"] = t_data_volt
+
+
+            # Build per-channel dict for later processing
+            data = {}
             if any(mode in self.mode for mode in ['time domain', 'X vs Y', 'resonance']):
-                data['t_volt'] = t_data
+                data['t_volt'] = t_data_volt
                 if any(mode in self.mode for mode in ['time domain', 'resonance']):
-                    data['t'] = np.arange(len(t_data)) / sampling_rate
+                    data['t'] = np.arange(len(t_data_volt)) / sampling_rate
 
-            if any(mode in self.mode for mode in ['frequency domain', 'resonance']):    
-                data['t_acc'] = (9.81 / 10) * t_data / self.amp_gain
+            if any(mode in self.mode for mode in ['frequency domain', 'resonance']):
+                data['t_acc'] = (9.81 / 10) * t_data_volt / self.amp_gain
                 if 'frequency domain' in self.mode:
                     freq, psd_acc = sc.signal.periodogram(data['t_acc'], fs=sampling_rate)
-                    freq = freq[1:-1]
-                    psd_acc = psd_acc[1:-1]
+                    freq = freq[1:-1]; psd_acc = psd_acc[1:-1]
                     data['f'] = freq
                     data['psd_acc'] = psd_acc
-                    data['psd_pos'] = psd_acc / freq ** 2
+                    data['psd_pos'] = psd_acc / freq**2
 
- 
-                self.logger.info(f"Channel {channel.port} data successfully transferred")
-
-
-            # Update channel data after processing all chunks
+            # Update the channel’s data container
             self.channels = [
-                f._replace(data=data) if f.port == channel.port else f 
+                f._replace(data=data) if f.port == channel.port else f
                 for f in self.channels
             ]
 
         self.yk.write(':COMMunicate:REMote OFF')
         self.yk.close()
 
+        # Harmonize lengths just in case
+        min_len = min(len(np.asarray(v)) for v in data_raw.values())
+        for k in list(data_raw.keys()):
+            arr = np.asarray(data_raw[k])
+            if len(arr) != min_len:
+                self.logger.warning(f"Column {k} length {len(arr)} != {min_len}; trimming.")
+                data_raw[k] = arr[:min_len]
+            else:
+                data_raw[k] = arr
+
         self.timestamp = self._generate_timestamp()
-        raw_df = pd.DataFrame(data_raw)
-        raw_data_dir = "./raw_data"
-        os.makedirs(raw_data_dir, exist_ok=True)
-        raw_df.to_csv(os.path.join(raw_data_dir, f"{self.timestamp}_raw_data.csv"), index=False)
-    
+        t_data_raw_df = pd.DataFrame(data_raw)
+
+        self.timestamp = self._generate_timestamp()
+        raw_df = pd.DataFrame(t_data_raw_df)
+            
+        raw_df.to_csv(os.path.join(save_dir, f"{self.timestamp}_raw_data.csv"), index=False)
+        
         # Print first few rows to verify
         print(raw_df.head())
 
-    def save(self, label, save_dir):
+    def save(self, save_dir):
 
         print("Beginning save")
-        df = pd.DataFrame()
-        
-        for channel in self.channels:
+
+                # Save corrected force vs displacement CSV if both channels are present
+        try:
+            force_channel = next(ch for ch in self.channels if ch.data_type == 'force')
+            disp_channel = next(ch for ch in self.channels if ch.data_type == 'displacement')
+
+            force_voltage = np.array(force_channel.data['t_volt'])
+            disp_voltage = np.array(disp_channel.data['t_volt'])
+
+            # Convert to N and mm
+            force_measured = 9.81 * (1.2066 * (force_voltage - 0.6936)) # 9.81 * (1.2506 * force_voltage - 0.6525) # 
+            a = 38.1 / (2e-5 - self.V_o_disp)
+            displacement_mm = a * (disp_voltage - self.V_o_disp) # Older version: -38.1 / self.volt * disp_voltage
+            sensor_compression_mm = displacement_mm
             
-            # For each key in the data dictionary (like 't_volt')
-            for data_key, values in channel.data.items():
+            # Compute spring force
+            k_sensor = 0.101  # N/mm, user-defined
+            spring_force = k_sensor * sensor_compression_mm
 
-                if len(channel.data) == 1:
-                    column_name = f"channel{channel.port}_{channel.data_type}"
-                else:
-                    column_name = f"channel{channel.port}_{channel.data_type}_{data_key}"
-            
-                logging.info('Setting column name to: ' + column_name)
-                # Convert numpy array to pandas series
-                df[column_name] = values
-        
-        print(df)
+            # Corrected force
+            corrected_force = force_measured - spring_force
 
-        # Generate a timestamp for this set of data
-        self.timestamp = self._generate_timestamp()
-        file_name = f"{self.timestamp}_{label}.csv"
+            df_force_corrected = pd.DataFrame({
+                'measured_force_N': force_measured,
+                'displacement_mm': displacement_mm,
+                'sensor_compression_mm': sensor_compression_mm,
+                'sensor_spring_force_N': spring_force,
+                'corrected_force_N': corrected_force
+            })
 
-        os.makedirs(save_dir, exist_ok=True)
-        df.to_csv(os.path.join(save_dir, file_name), index=False)
+            # Save to CSV
+            corr_csv_name = f"{self.timestamp}_force_corrected.csv"
+            self.corrected_csv = os.path.join(save_dir, corr_csv_name)
+            df_force_corrected.to_csv(self.corrected_csv, index=False)
+            print(f"Saved corrected force data to {corr_csv_name}")
+
+        except StopIteration:
+            print("Either force or displacement channel missing. Skipping correction CSV.")
+
 
     def plot(self, avg_factor=50):
         figs = []
@@ -463,35 +472,23 @@ class acq:
 
         if 'X vs Y' in self.mode:
 
-            """Get force channel data"""
-            force_channel = next(ch for ch in self.channels if ch.data_type == 'force')
-            force_voltage = np.array(force_channel.data['t_volt'])
-
-            ###### Convert the force data from volts to Newtons
-            #### Assuming a linear relation between output voltage range and measurable force range
-            # Conversion to Newtons as given by the sensor spec sheet
-            # y = 4.44822162 * (0.25 * (force_voltage - 1.25))
-            # Grams to Newtons, calibration with the weights
-            y = 9.81 * (1.2506 * force_voltage - 0.6525)
+            df = None
+            """Get force and displacement data from the corrected csv file"""
+            if self.corrected_csv and os.path.isfile(self.corrected_csv):
+                df = pd.read_csv(self.corrected_csv)
+            else:
+                print("Warning: corrected CSV not found. Skipping plot.")
+                return figs
             
+            x = df['displacement_mm'].to_numpy()
+            y = df['corrected_force_N'].to_numpy()
 
-            """Get displacement data (x-axis)"""
-            disp_channel = next(ch for ch in self.channels if ch.data_type == 'displacement')
-            disp_voltage = np.array(disp_channel.data['t_volt'])
-
-            ########## Convert the displacement data from volts to mm
-            ##### Assuming a linear relation between the voltage range and mechanical travel range
-            #### Using the electrical travel distance of 38.1mm
-            x = -38.1/self.volt * disp_voltage
-            print(np.min(x), np.max(x)) 
-            #x = x - np.min(x)  # Zero the minimum displacement
-            
             # Average reduction
             x_reduced = average_reduce(x, avg_factor)
-            x_reduced = x_reduced - np.min(x_reduced)  # Zero the minimum displacement
+            # x_reduced = x_reduced - np.min(x_reduced)  # Zero the minimum displacement
             
             y_reduced = average_reduce(y, avg_factor)
-            y_reduced = y_reduced - np.min(y_reduced)  # Zero the minimum force
+            # y_reduced = y_reduced - np.min(y_reduced)  # Zero the minimum force
             
             fig = go.Figure(data=go.Scatter(
                 x=x_reduced,
@@ -526,13 +523,17 @@ class acq:
             pio.write_image(fig, filepath)
             print(f"Saved figure to {filepath}")
 
+
+
 ### Beginning of Main ###
 if __name__ == "__main__":
 
-    
-    flexure_type = "bestYet2Hz_50pts_mbuckle_0rot_belleville_FOnly"
+    avg_factor = 50
+    flexure_type = f'sec8.88_0rot_belleville_noOring_{avg_factor}pts'
     save_folder=datetime.now().strftime('%Y%m%d')+str("_")+flexure_type
-    save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS\FvsD_August11"), save_folder)
+    save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS\FvsD_August13"), save_folder)
+
+    os.makedirs(save_dir, exist_ok=True)
 
     # Parameters (The sample rate is not being reflected in the settings, defaults to 1kHz. Why?)
     desired_sample_rate='100Hz' # Try 5 samples / sec
@@ -551,7 +552,6 @@ if __name__ == "__main__":
         mode=['X vs Y'],
         volt=0.2,
         load_volt=5.0,
-        noise_period_ms=noise_period_ms,
         record_length=desired_record_length,
         sampling_rate=100
     )
@@ -577,11 +577,16 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error running Yokogawa oscilloscope: {e}")
 
+    
     try:
         print('Saving the data')
-        osc.save('FvsD_'+flexure_type, save_dir)
+        osc.save(save_dir)
     except Exception as e:
         print(f"Error saving the data: {e}")
 
-    figs = osc.plot(avg_factor=50)
-    osc.save_figures(figs, save_dir)
+    try:
+        print('Plotting and saving the graph')
+        figs = osc.plot(avg_factor=avg_factor)
+        osc.save_figures(figs, save_dir)
+    except Exception as e:
+        print(f"Error plotting and saving the data: {e}")
