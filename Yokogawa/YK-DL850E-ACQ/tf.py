@@ -570,7 +570,7 @@ class tf:
 
         # Write to a text file the final queried_sample_rate, the actual_time_div, and the record_length for the driving frequency
         with open(os.path.join(save_dir, f"{frequency}Hz_README.txt"), 'w') as f:
-            f.write(f"Input waveform shape: {shapeType} \n")
+            f.write(f"Input waveform shape: {shapeType} \n")    
             f.write(f"Frequency: {frequency} Hz\n")
             f.write(f"Sample Rate: {queried_sample_rate} Hz\n")
             f.write(f"Time Division: {actual_time_div} s\n")
@@ -706,12 +706,11 @@ def plot_tf_from_df(df, filename, save_dir, timestamp, label): # Need to change 
 # Sweeps frequencies in the range 0, 200 with 20 steps in between
 numPoints = 10
 volt = ['3.0'] # later with amplifier: '2.370'
-numChannels = 'single' # either 'single' or 'dual'
+numChannels = 'single' # (DO NOT CHANGE) either 'single' or 'dual'
 
 shapeType = 'SINusoid'  #  'SQUare'
-springType = "print1_0.0631kg" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
-# "noAirlegs_flexureNorm_copperPlate_sixPE016springs_2rot-2rot_7136_100x"
-data_type="ch1top_ch2bot_x10"
+springType = "print1_0.0631kg" # ex. "bestYet2Hz_flexureOnly_0.5452kg" 
+data_type="ch1top_ch2bot_x10" # Information which channel is which & PSU amplification 
 
 """
 Enter the driving frequency range.
@@ -792,6 +791,7 @@ if __name__ == "__main__":
         tf.initialize_instruments(sample_rate='10k', voltage=v, shape=shapeType)
         # Can I do a shape='PULSE' with 
         os.makedirs(save_dir, exist_ok=True)
+        
         time.sleep(1)
         all_transfer_data = tf.measure(numChannels, shapeType, frequency, iterations, bin_size=1, timestamp=f"{timestamp}")
         
