@@ -251,7 +251,7 @@ def plot_acceleration_segment(acc_data, freq, fs, channel_label, start_time=0.0,
 
     # Example usage for CH1: 0 to 2 seconds
     # plot_acceleration_segment(acc_data=acc_ch1, fs=fs, channel_label="CH1", start_time=0.0, end_time=2.0, save_dir=save_dir)
-def plot_psd(c, freq, psd_data, frequency_of_interest, save_dir, log=False):
+def plot_psd(c, freq, psd_data, frequency_of_interest, save_dir, log=True):
     """
     Plot the Power Spectral Density (PSD) for a given channel.
     Highlights the peak value and saves the figure.
@@ -259,9 +259,9 @@ def plot_psd(c, freq, psd_data, frequency_of_interest, save_dir, log=False):
     rounded_freq = round(frequency_of_interest, 2)
 
     # Ensure freq and psd_data are arrays and not empty
-    if len(freq) == 0 or len(psd_data) == 0:
-        print(f"[Warning] Empty PSD data for channel {c} — skipping plot.")
-        return
+    # if len(freq) == 0 or len(psd_data) == 0:
+    #     print(f"[Warning] Empty PSD data for channel {c} — skipping plot.")
+    #     return
 
     # peak_idx = np.argmax(psd_data)
     # peak_freq = freq[peak_idx]
@@ -269,13 +269,14 @@ def plot_psd(c, freq, psd_data, frequency_of_interest, save_dir, log=False):
 
     plt.figure(figsize=(7,5))
     if log:
-        plt.loglog(freq, psd_data, label=f"CH{c} PSD at {rounded_freq} Hz")
+        plt.semilogy(freq, psd_data, label=f"CH{c} PSD at {rounded_freq} Hz")
     else:
         plt.plot(freq, psd_data)
     
     plt.title(f"CH{c} PSD at driv freq {rounded_freq} Hz")
     plt.xlabel("Frequency [Hz]")
     plt.ylabel("Power Spectral Density [m²/Hz]")
+    plt.xlim(0,100)
     plt.legend(fontsize=8)
     plt.grid(True, which='both', linestyle='--', linewidth=0.4)
     plt.tight_layout()
@@ -303,28 +304,28 @@ if __name__ == "__main__":
 
     #top_dir = [f for f in os.listdir() if f.startswith("top")][0]  # Get the top directory  
     #bot_dir = [f for f in os.listdir() if f.startswith("bot")][0]  # Get the bottom directory
-    bot_dir = r"Z:\Users\Soyeon\SoyeonChoi_fromQZSDesktop\QZS_2505201413_backup\202505201353_bot_bestYet2Hz_can_vol67_tf_100points_1.0V"
-    save_path = os.path.join(bot_dir, f"bot_psd.csv")
+    bot_dir = r"Z:\Users\Soyeon\Sep\202509021237_print1_0.0631kg_ch1top_ch2bot_x10_tf_3.0VSINusoid"
+    save_path = bot_dir
 
     # Load both files
     # List matching CSV files
-    # top_files = sorted(f for f in os.listdir(top_dir) if f.startswith("acceleration_data_"))
-    bot_files = sorted(f for f in os.listdir(bot_dir) if f.startswith("acceleration_data_"))
+    #top_files = sorted(f for f in os.listdir(top_dir) if f.startswith("ch1_acceleration_data_"))
+    #bot_files = sorted(f for f in os.listdir(bot_dir) if f.startswith("*_acceleration_data_"))
     
 
     array_psd_bot = []
 
     # Get the waveform length from the first file
-    waveform_length = len(bot_files[0])
+    waveform_length = 1000000
 
 
     # Get the frequencies from the filenames
-    frequencies = []
-    for file in bot_files:
-        match = re.search(r'(\d+\.\d+)Hz', file)
-        if match:
-            frequencies.append(float(match.group(1)))
-    print(f"Frequencies found: {frequencies}")
+    frequencies = [8]
+    # for file in bot_files:
+    #     match = re.search(r'(\d+\.\d+)Hz', file)
+    #     if match:
+    #         frequencies.append(float(match.group(1)))
+    # print(f"Frequencies found: {frequencies}")
 
     
 
@@ -332,8 +333,8 @@ if __name__ == "__main__":
     for freq in frequencies:
         # Construct matching filenames
         freq_str = f"{freq}Hz"
-        bot_file = os.path.join(bot_dir, f"acceleration_data_{freq_str}.csv")
-        # top_file = os.path.join(top_dir, f"acceleration_data_{freq_str}.csv")
+        bot_file = os.path.join(bot_dir, f"ch2_acceleration_data_{freq_str}.csv")
+        top_file = os.path.join(bot_dir, f"ch1_acceleration_data_{freq_str}.csv")
 
         # fs_top, nperseg_top = run_welch_loop(top_file, fs_default=sampling_rate)
         # fs_bot, nperseg_bot = run_welch_loop(bot_file, fs_default=sampling_rate)
@@ -346,7 +347,7 @@ if __name__ == "__main__":
         # Compute peak PSD for both top and bottom
         try:
             f_bot_peak, psd_bot = compute_psd(bot_file, sampling_rate, nseg)
-            #f_top_peak, psd_top = compute_psd(top_file, sampling_rate, nseg)
+            f_top_peak, psd_top = compute_psd(top_file, sampling_rate, nseg)
             
             # Show the computed PSD values and the normalized transmissibility
             #print(f"Frequency: {freq_str}, Top PSD: {psd_top:.2e}, Bottom PSD: {psd_bot:.2e}")
@@ -363,22 +364,27 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Skipping {freq_str}: {e}")
         
-    # Save to CSV
-    df = pd.DataFrame({
-        "frequency": frequencies,
-        "bot": array_psd_bot
-    })
-    
-    df.to_csv(save_path, index=False)
-    print(f"Saved PSD CSV for {freq}Hz to {save_path}")
+        # Save to CSV
+        df = pd.DataFrame({
+            "frequency": frequencies,
+            "bot": array_psd_bot
+        })
+
+        plot_psd(1, freq, psd_bot, 8, save_path, log=False)
+        plot_psd(2, freq, psd_top, 8, save_path, log=False)
+
+    #df.to_csv(save_path, index=False)
+    #print(f"Saved PSD CSV for {freq}Hz to {save_path}")
+
+        
 
     # Plot
-    plt.loglog(frequencies, array_psd_bot, label=f"Bottom PSD")
-    plt.xlabel("Frequency (Hz)")
-    plt.ylabel("PSD (m²/s⁴/Hz)")
-    plt.title("Bottom Signal PSDs")
-    plt.legend()
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.tight_layout()
-    plt.savefig(os.path.join(bot_dir, "bot_psd.png"), dpi=300)
-    plt.show()
+    # plt.semilogy(frequencies, array_psd_bot, label=f"Bottom PSD")
+    # plt.xlabel("Frequency (Hz)")
+    # plt.ylabel("PSD (m²/s⁴/Hz)")
+    # plt.title("Bottom Signal PSDs")
+    # plt.legend()
+    # plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+    # plt.tight_layout()
+    # plt.savefig(os.path.join(bot_dir, "bot_psd.png"), dpi=300)
+    # plt.show()

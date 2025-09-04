@@ -319,7 +319,7 @@ class tf:
         self.yk.write(':WAVEFORM:FORMAT WORD')
         self.yk.write(':WAVEFORM:BYTEORDER LSBFIRST')
 
-        # General Timebase settings
+        # General Timebase settingsf
         self.yk.write(':TIMebase:TDIV ' + '1s')
         self.yk.write(':TIMebase:SRATe' + sample_rate)
         q = self.yk.write(':TIMebase:SRATe?')
@@ -428,7 +428,8 @@ class tf:
                 end_time = 2.0
             psd.plot_acceleration_segment(acceleration_data, frequency_of_interest, sampling_rate, f"CH{c}", start_time=0.0, end_time=end_time, save_dir=save_dir)
 
-            
+            # optimal_nperserg = psd.optimal_nperseg(acceleration_data, sampling_rate, freq_of_interest, waveform_length,
+                    # min_cycles=5, max_cycles=18, window='hamming', noverlap=None, verbose=False)
            
             # Calculate the position power spectral density using welch or periodogram:
             if type == 'welch':
@@ -538,7 +539,7 @@ class tf:
         self.logger.info(f"Actual sample rate - 1st: {queried_sample_rate}")
         
         # Set the record length
-        record_length = 60 * int(parse_unit_string(self.__sample_rate))
+        record_length = 20 * int(parse_unit_string(self.__sample_rate))
         
         record_length = round_acq_record_length(record_length)
         self.logger.info(f"Setting the record length to : {record_length}")
@@ -704,12 +705,14 @@ def plot_tf_from_df(df, filename, save_dir, timestamp, label): # Need to change 
 ### Beginning of Main ###
 
 # Sweeps frequencies in the range 0, 200 with 20 steps in between
-numPoints = 10
-volt = ['3.0'] # later with amplifier: '2.370'
+numPoints = 38
+start_freq = 18
+end_freq = 70 #24Hz will be 0.5V
+volt = ['2.0'] # AWG Voltage
 numChannels = 'single' # either 'single' or 'dual'
 
-shapeType = 'SINusoid'  #  'SQUare'
-springType = "print1_0.0631kg" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
+shapeType = 'SINusoid'  #  '\\\\\\\\SQUare'
+springType = "bestYet2Hz_0.9588kg_newSetup" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
 # "noAirlegs_flexureNorm_copperPlate_sixPE016springs_2rot-2rot_7136_100x"
 data_type="ch1top_ch2bot_x10"
 
@@ -718,8 +721,7 @@ Enter the driving frequency range.
 The start_freq and end_freq will be used to generate the frequency array:
 np.logspace(np.log10(start_freq), np.log10(end_freq), num=numPoints)
 """
-start_freq = 0.1
-end_freq = 100
+
 
 # Up to 50Hz it's ok. 1,67
 
@@ -739,13 +741,12 @@ if __name__ == "__main__":
         save_folder = f"{datestamp}_{label}"
 
         # save_dir=os.path.join(os.path.expanduser("~\\Desktop\SoyeonChoi\QZS"), save_folder)
-        save_dir = os.path.join(os.path.expanduser(r"Z:\Users\Soyeon\AugustQZS"), save_folder)
-
-        baseFreq = [0.3, 0.5, 0.7, 1, 1.2, 2, 2.5, 3, 3.7, 5, 7, 7.6, 11, 13, 14.8, 17, 19, 19.7, 21.1, 19, 23, 23.5, 26, 29, 31, 37, 80] # 80Hz = use 2.5V
+        save_dir = os.path.join(os.path.expanduser(r"Z:\Users\Soyeon\Sep"), save_folder)
 
         if shapeType == 'SQUare':
+            baseFreq= [7] # 80Hz = use 2.5V
             frequency = baseFreq
-        else: 
+        else: # shapeType == 'Sinusoid'
             
             '''
             Option1
@@ -773,7 +774,7 @@ if __name__ == "__main__":
             Option2
             '''
             # frequency = np.logspace(np.log10(start_freq), np.log10(end_freq), num=numPoints) #np.log10(30), np.log10(26)
-            frequency = np.arange(1,100,10)
+            frequency = np.linspace(start_freq, end_freq, num=numPoints)
         
 
         # Will take different frequency values 
@@ -792,10 +793,9 @@ if __name__ == "__main__":
         tf.initialize_instruments(sample_rate='10k', voltage=v, shape=shapeType)
         # Can I do a shape='PULSE' with 
         os.makedirs(save_dir, exist_ok=True)
-        time.sleep(1)
+        time.sleep(0.1)
         all_transfer_data = tf.measure(numChannels, shapeType, frequency, iterations, bin_size=1, timestamp=f"{timestamp}")
-        
-       
+
         tf.close_instruments()
 
         # Assumes we are collecting from two channels only
