@@ -705,14 +705,14 @@ def plot_tf_from_df(df, filename, save_dir, timestamp, label): # Need to change 
 ### Beginning of Main ###
 
 # Sweeps frequencies in the range 0, 200 with 20 steps in between
-numPoints = 38
-start_freq = 18
+numPoints = 50
+start_freq = 22
 end_freq = 70 #24Hz will be 0.5V
 volt = ['2.0'] # AWG Voltage
 numChannels = 'single' # either 'single' or 'dual'
 
 shapeType = 'SINusoid'  #  '\\\\\\\\SQUare'
-springType = "bestYet2Hz_0.9588kg_newSetup" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
+springType = "bestYet2Hz_1.107kg_newSetup" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
 # "noAirlegs_flexureNorm_copperPlate_sixPE016springs_2rot-2rot_7136_100x"
 data_type="ch1top_ch2bot_x10"
 
