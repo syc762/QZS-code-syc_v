@@ -571,7 +571,7 @@ class tf:
 
         # Write to a text file the final queried_sample_rate, the actual_time_div, and the record_length for the driving frequency
         with open(os.path.join(save_dir, f"{frequency}Hz_README.txt"), 'w') as f:
-            f.write(f"Input waveform shape: {shapeType} \n")
+            f.write(f"Input waveform shape: {shapeType} \n")    
             f.write(f"Frequency: {frequency} Hz\n")
             f.write(f"Sample Rate: {queried_sample_rate} Hz\n")
             f.write(f"Time Division: {actual_time_div} s\n")
@@ -709,10 +709,10 @@ numPoints = 38
 start_freq = 18
 end_freq = 70 #24Hz will be 0.5V
 volt = ['2.0'] # AWG Voltage
-numChannels = 'single' # either 'single' or 'dual'
+numChannels = 'single' # (DO NOT CHANGE) either 'single' or 'dual'
 
-shapeType = 'SINusoid'  #  '\\\\\\\\SQUare'
-springType = "bestYet2Hz_0.9588kg_newSetup" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
+shapeType = 'SINusoid'  #  'SQUare'
+springType = "print1_0.0631kg" # "bestYet2Hz_flexureOnly_0.5452kg" # _finer_vol67
 # "noAirlegs_flexureNorm_copperPlate_sixPE016springs_2rot-2rot_7136_100x"
 data_type="ch1top_ch2bot_x10"
 
@@ -793,7 +793,7 @@ if __name__ == "__main__":
         tf.initialize_instruments(sample_rate='10k', voltage=v, shape=shapeType)
         # Can I do a shape='PULSE' with 
         os.makedirs(save_dir, exist_ok=True)
-        time.sleep(0.1)
+        time.sleep(1)
         all_transfer_data = tf.measure(numChannels, shapeType, frequency, iterations, bin_size=1, timestamp=f"{timestamp}")
 
         tf.close_instruments()
